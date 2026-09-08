@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/iamzhangxin/xuandu-gateway/internal/idl"
+	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	"github.com/iamzhangxin/xuandu-gateway/internal/router"
 )
 
@@ -14,9 +15,19 @@ import (
 // the same lock as publication, eliminating the load-then-increment retirement race.
 type Snapshot struct {
 	Version  uint64
-	Routes   router.Table
+	Routes   map[string]router.Table
+	Domains  map[string]string
 	Runtimes map[string]*ServiceRuntime
 }
+
+func (s *Snapshot) Match(app, method, path string) (router.Target, bool) {
+	table := s.Routes[app]
+	if table == nil {
+		return router.Target{}, false
+	}
+	return table.Match(method, path)
+}
+
 type Manager struct {
 	publishMu sync.Mutex
 	current   atomic.Pointer[Snapshot]
@@ -32,9 +43,8 @@ type Lease struct {
 }
 
 func NewManager() *Manager {
-	t, _ := router.Build(nil)
 	m := &Manager{drained: make(chan struct{})}
-	m.current.Store(&Snapshot{Routes: t, Runtimes: map[string]*ServiceRuntime{}})
+	m.current.Store(&Snapshot{Routes: map[string]router.Table{}, Domains: map[string]string{}, Runtimes: map[string]*ServiceRuntime{}})
 	return m
 }
 func (m *Manager) Load() *Snapshot { return m.current.Load() }
@@ -88,28 +98,38 @@ func (m *Manager) Publish(name string, next *ServiceRuntime, persist func() erro
 	old := m.current.Load()
 	m.mu.Unlock()
 	rs := make(map[string]*ServiceRuntime, len(old.Runtimes)+1)
-	routes := map[string][]idl.Route{}
+
 	for n, r := range old.Runtimes {
 		if n != name {
 			rs[n] = r
-			routes[n] = r.Routes
 		}
 	}
 	if next != nil {
 		rs[name] = next
-		routes[name] = next.Routes
 	}
-	table, e := router.Build(routes)
-	if e != nil {
-		return e
+	tables := map[string]router.Table{}
+	domains := map[string]string{}
+	for n, r := range rs {
+		domain, err := metadata.NormalizeDomain(r.Config.Domain)
+		if err != nil {
+			return err
+		}
+		if owner, exists := domains[domain]; exists && owner != n {
+			return metadata.ErrDomainConflict
+		}
+		table, err := router.Build(map[string][]idl.Route{n: r.Routes})
+		if err != nil {
+			return err
+		}
+		domains[domain], tables[n] = n, table
 	}
 	if persist != nil {
-		if e = persist(); e != nil {
+		if e := persist(); e != nil {
 			return e
 		}
 	}
 	m.mu.Lock()
-	m.current.Store(&Snapshot{Version: old.Version + 1, Routes: table, Runtimes: rs})
+	m.current.Store(&Snapshot{Version: old.Version + 1, Routes: tables, Domains: domains, Runtimes: rs})
 	retired := old.Runtimes[name]
 	closeNow := false
 	if retired != nil && retired != next {

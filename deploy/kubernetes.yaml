@@ -48,9 +48,10 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+        fsGroup: 10001
       containers:
         - name: xuandu
-          image: xuandu:v0.0.1 # Replace with your published image address.
+          image: xuandu:v0.0.2 # Replace with your published image address.
           imagePullPolicy: IfNotPresent
           ports:
             - {name: api, containerPort: 8080}
@@ -80,7 +81,10 @@ spec:
             periodSeconds: 10
           volumeMounts:
             - {name: config, mountPath: /etc/xuandu, readOnly: true}
+            - {name: logs, mountPath: /app/logs}
       volumes:
+        - name: logs
+          emptyDir: {sizeLimit: 512Mi}
         - name: config
           configMap: {name: xuandu-config}
 ---

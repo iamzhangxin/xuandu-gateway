@@ -48,14 +48,14 @@ func TestZIPPublicationAtomic(t *testing.T) {
 	manager := rt.NewManager()
 	defer manager.Close(ctx)
 	service := admin.NewService(store, archiveidl.NewFetcher(), rt.NewBuilder(consul.DefaultConfig()), manager)
-	req := admin.CreateAppRequest{Name: "p", ServiceName: "p", RPCTimeout: "1s", IDL: admin.ImportSource{Type: "zip", URL: server.URL}}
+	req := admin.CreateAppRequest{Name: "p", Domain: "p.example", ServiceName: "p", RPCTimeout: "1s", IDL: admin.ImportSource{Type: "zip", URL: server.URL}}
 	a, e := service.CreateApp(ctx, req)
 	if e != nil {
 		t.Fatal(e)
 	}
 	old := manager.Load()
 	for _, p := range []string{"/a", "/b"} {
-		if _, ok := old.Routes.Match("GET", p); !ok {
+		if _, ok := old.Match("p", "GET", p); !ok {
 			t.Fatal("missing route", p)
 		}
 	}
@@ -82,13 +82,13 @@ func TestZIPPublicationAtomic(t *testing.T) {
 	if e != nil || !r.Changed {
 		t.Fatal(r, e)
 	}
-	if _, ok := manager.Load().Routes.Match("GET", "/new"); !ok {
+	if _, ok := manager.Load().Match("p", "GET", "/new"); !ok {
 		t.Fatal("second IDL update lost")
 	}
-	if _, ok := manager.Load().Routes.Match("GET", "/b"); ok {
+	if _, ok := manager.Load().Match("p", "GET", "/b"); ok {
 		t.Fatal("old route retained")
 	}
-	if _, ok := manager.Load().Routes.Match("GET", "/a"); !ok {
+	if _, ok := manager.Load().Match("p", "GET", "/a"); !ok {
 		t.Fatal("first IDL route lost")
 	}
 }
@@ -101,7 +101,7 @@ func TestRestartRestoresWithoutDownloadURL(t *testing.T) {
 	first := rt.NewManager()
 	service := admin.NewService(store, archiveidl.NewFetcher(), &testutil.Builder{}, first)
 	ctx := context.Background()
-	req := admin.CreateAppRequest{Name: "p", ServiceName: "p", RPCTimeout: "1s", IDL: admin.ImportSource{Type: "zip", URL: server.URL + "?secret=one-use"}}
+	req := admin.CreateAppRequest{Name: "p", Domain: "p.example", ServiceName: "p", RPCTimeout: "1s", IDL: admin.ImportSource{Type: "zip", URL: server.URL + "?secret=one-use"}}
 	if _, err := service.CreateApp(ctx, req); err != nil {
 		t.Fatal(err)
 	}

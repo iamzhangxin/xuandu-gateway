@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/kitex/client/genericclient"
 
 	"github.com/iamzhangxin/xuandu-gateway/internal/idl"
+	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 )
 
 type closeClient struct {
@@ -20,7 +21,7 @@ type closeClient struct {
 
 func (c *closeClient) Close() error { c.count.Add(1); return nil }
 func fixture(n, p string) *ServiceRuntime {
-	return &ServiceRuntime{AppName: n, Routes: []idl.Route{{HTTPMethod: "GET", Path: p}}, Client: &closeClient{}}
+	return &ServiceRuntime{Config: metadata.App{Domain: n + ".example"}, AppName: n, Routes: []idl.Route{{HTTPMethod: "GET", Path: p}}, Client: &closeClient{}}
 }
 func TestSnapshotDrainAcrossGenerations(t *testing.T) {
 	m := NewManager()
@@ -57,7 +58,9 @@ func TestSnapshotCASFailureAndConflict(t *testing.T) {
 	m.ReplaceApp("a", fixture("a", "/a"))
 	before := m.Load()
 	persisted := false
-	if e := m.Publish("b", fixture("b", "/a"), func() error { persisted = true; return nil }); e == nil || persisted || m.Load() != before {
+	conflict := fixture("b", "/a")
+	conflict.Config.Domain = "a.example"
+	if e := m.Publish("b", conflict, func() error { persisted = true; return nil }); e == nil || persisted || m.Load() != before {
 		t.Fatal("conflict changed state")
 	}
 	if e := m.Publish("a", fixture("a", "/new"), func() error { return errors.New("CAS") }); e == nil || m.Load() != before {
@@ -91,7 +94,7 @@ func TestSnapshotConcurrent(t *testing.T) {
 		wg.Go(func() {
 			for j := 0; j < 100; j++ {
 				l := m.Acquire()
-				l.Snapshot.Routes.Match("GET", "/a")
+				l.Snapshot.Match("a", "GET", "/a")
 				l.Release()
 			}
 		})

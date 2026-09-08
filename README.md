@@ -46,6 +46,7 @@ cd ..
 # 替换成实际 Consul 地址；示例配置中不提供默认地址或凭据。
 export CONSUL_HTTP_ADDR='127.0.0.1:8500'
 export CONSUL_HTTP_TOKEN='' # Consul 启用 ACL 时设置有效 Token。
+export XUANDU_LOG_DIR="$PWD/.local/logs" # 本地开发目录；容器默认 /app/logs。
 
 go run ./cmd -config config/example.yaml
 ```
@@ -89,13 +90,14 @@ idl/
 zip -r contract.zip idl/ -i '*.thrift'
 ```
 
-在控制台新增应用，填写应用名称、Consul 服务名称、RPC 超时和 ZIP 下载链接。也可以调用管理 API：
+在控制台新增应用，填写应用编码、应用域名、Consul 服务名称、RPC 超时和 ZIP 下载链接。也可以调用管理 API：
 
 ```sh
 curl --fail-with-body http://127.0.0.1:9090/admin/apps \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "product",
+    "domain": "product.example.com",
     "serviceName": "product-service",
     "rpcTimeout": "3s",
     "idl": {"type": "zip", "url": "https://example.com/contract.zip"}
@@ -104,7 +106,19 @@ curl --fail-with-body http://127.0.0.1:9090/admin/apps \
 
 `serviceName` 必须与 Consul 中已注册、可访问的后端服务匹配。后端须支持 Kitex Thrift 与 TTHeader 元信息；网关不会启动后端服务。
 
-成功发布后即可访问 `http://127.0.0.1:8080/api/product/get?id=123`。
+应用通过域名隔离，先按 HTTP `Host` 选择应用，再在该应用内匹配方法和路径。不同应用允许相同路径，同一域名只能绑定一个应用（停用后仍保留绑定）。`X-App-Code` 必须唯一且与应用 `name` 完全一致；缺失、不匹配或重复时返回 HTTP 403，未知域名返回 HTTP 404。
+
+本地无需修改 DNS，可这样调用：
+
+```sh
+curl --fail-with-body 'http://127.0.0.1:8080/api/product/get?id=123' \
+  -H 'Host: product.example.com' \
+  -H 'X-App-Code: product'
+```
+
+域名配置不包含协议、端口或路径；支持 DNS 名称、localhost 或 IP，按小写统一并忽略末尾的点。请求 Host 中的端口不参与应用匹配。代理必须保留 Host；不会信任 `X-Forwarded-Host`。域名与应用编码用于路由一致性校验，应用编码不是调用密钥。
+
+升级前创建的应用缺少域名时显示「待配置」，不阻止 Pod 就绪和控制台访问，但必须通过「更新应用」补充域名后才会开放 HTTP/MCP 调用，无需重新上传 ZIP。`/healthz`、`/readyz` 探针和独立端口上的控制台不要求业务域名或 `X-App-Code`。
 
 **ZIP 约束：** 根目录必须为 `idl/`，普通文件只能是 `.thrift`；禁止额外说明文件、`__MACOSX`、符号链接、路径穿越及损坏文件。压缩包上限 32 MiB，解压上限 64 MiB，最多 1024 个条目。每个含 service 的文件目前支持一个 service，方法使用单 struct 入参及 struct 返回，不支持 oneway 或 service extends。
 
@@ -146,6 +160,17 @@ GET /admin/apps/{name}/openapi.json
 
 HTTP 入口仅透传 `X-User-ID` 到 RPC 上下文。它不是身份认证机制，身份校验应由可信的前置服务完成。
 
+## 日志
+
+默认同时输出到标准输出与 `/app/logs/xuandu.log`，包含网关请求、MCP 工具调用、启动日志及 Hertz/Kitex 框架日志。网关日志使用 JSON，框架日志保留各自格式。文件同步追加写入，重启不清空已有文件；单文件上限 50 MiB，保留 5 个历史文件（`.1` 最新，至 `.5`），总量约 300 MiB。文件写入失败会在 stderr 报告，标准输出仍可查看。
+
+设置 `XUANDU_LOG_DIR` 可覆盖目录；例如本地开发使用 `.local/logs`。启动时如果目录无法创建或写入，会明确报错退出。容器已创建可写目录；K8s 清单为每个 Pod 单独挂载 `emptyDir`，容器重启保留日志，Pod 删除或重建后不保留。需要长期保存时接入日志采集或自行配置持久卷。
+
+```sh
+kubectl -n xuandu-gateway logs deployment/xuandu --tail=100
+kubectl -n xuandu-gateway exec deployment/xuandu -- tail -n 100 /app/logs/xuandu.log
+```
+
 ## MCP
 
 1. 在控制台新增 MCP 服务，选择应用，填写路径，例如 `/product/mcp`。
@@ -155,21 +180,23 @@ HTTP 入口仅透传 `X-User-ID` 到 RPC 上下文。它不是身份认证机制
 
 ```json
 {
-  "url": "http://127.0.0.1:8081/product/mcp",
+  "url": "https://product.example.com/product/mcp",
   "headers": {"X-MCP-Key": "<your-key>"}
 }
 ```
 
-服务按路径匹配，不绑定域名；配置只接受路径，不接受完整 URL。一个服务可配置多个路径，不同服务不能占用相同路径。认证 Header 可自定义，也支持 `Authorization: Bearer <key>`。
+MCP 服务按路径匹配，并强制校验请求 Host 属于其关联应用；不校验 `X-App-Code`，但原有 Key 和工具授权仍然生效。域名不同的请求返回 HTTP 403，即使持有有效 Key 也无法调用。配置只接受路径，不接受完整 URL，域名在应用中维护。一个服务可配置多个路径，不同服务不能占用相同路径。认证 Header 可自定义，也支持 `Authorization: Bearer <key>`。
 
 Key 原文只在创建或轮换时显示，Consul 保存其摘要。授权同步间隔为 5 秒；无法刷新有效权限超过 60 秒后拒绝新 MCP 请求。MCP 身份与 HTTP 用户身份独立，不把 MCP Key 或调用方自带的 `X-User-ID` 透传给后端。
+
+本地 MCP 联调可将应用域名暂设为 `127.0.0.1`，然后访问 `http://127.0.0.1:8081/product/mcp`；也可以通过本地 DNS/hosts 或客户端 Host 设置使用已配置域名。
 
 工具复用网关执行链路，成功时在 MCP text 和 structuredContent 中返回统一响应对象，业务失败设置 `isError=true`。当前使用无状态 JSON 响应，不提供 OAuth 登录、长期 SSE 会话或跨域浏览器配置。
 
 ## Docker
 
 ```sh
-docker build -t xuandu:v0.0.1 .
+docker build -t xuandu:v0.0.2 .
 
 # 容器内控制台监听所有接口，宿主机仅向本机开放控制台。
 sed 's/127.0.0.1:9090/0.0.0.0:9090/' config/example.yaml > /tmp/xuandu.yaml
@@ -179,7 +206,7 @@ docker run --rm --name xuandu \
   -p 8080:8080 -p 8081:8081 -p 127.0.0.1:9090:9090 \
   -e CONSUL_HTTP_ADDR -e CONSUL_HTTP_TOKEN \
   -v /tmp/xuandu.yaml:/etc/xuandu/gateway.yaml:ro \
-  xuandu:v0.0.1
+  xuandu:v0.0.2
 ```
 
 先设置容器可访问的 `CONSUL_HTTP_ADDR`；容器中的 `127.0.0.1` 指向容器自身。默认 Docker 构建包含前端和 Go 编译，镜像使用非 root 用户运行。
@@ -237,7 +264,7 @@ go build -o bin/xuandu ./cmd
 | `REGISTRY_USERNAME` | 推送用户名 |
 | `REGISTRY_PASSWORD` | 推送密码或访问令牌 |
 
-发布 `v0.0.1` 会生成架构标签和多架构 `v0.0.1`，正式 `v数字.数字.数字` 标签更新 `latest`。从分支手动运行使用 `sha-短SHA-runId-attempt`，预发布标签不更新 `latest`。需要仓库可使用 `ubuntu-24.04-arm` runner，推送账号具有目标路径的推送和标签覆盖权限。
+发布 `v0.0.2` 会生成架构标签和多架构 `v0.0.2`，正式 `v数字.数字.数字` 标签更新 `latest`。从分支手动运行使用 `sha-短SHA-runId-attempt`，预发布标签不更新 `latest`。需要仓库可使用 `ubuntu-24.04-arm` runner，推送账号具有目标路径的推送和标签覆盖权限。
 
 镜像地址不写入源码或发布摘要，Docker 构建记录制品和构建摘要已关闭。凭据只能放入 Secrets，不要提交本地配置、Token 文件或 `.env`。
 

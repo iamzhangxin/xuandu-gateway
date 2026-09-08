@@ -17,7 +17,7 @@ func TestAPI(t *testing.T) {
 	for _, tc := range []struct {
 		method, path, body string
 		status             int
-	}{{"GET", "/admin/apps/missing", "", 404}, {"POST", "/admin/apps", "{", 400}, {"POST", "/admin/apps", `{"name":"p","serviceName":"p","rpcTimeout":"1s","idl":{"type":"zip","url":"https://example.com/idl.zip"}}`, 200}, {"POST", "/admin/apps/p/update", "", 200}, {"POST", "/admin/apps/p/update", `{"rpcTimeout":"2s"}`, 200}, {"POST", "/admin/apps/p/update", `{"unexpected":true}`, 400}, {"GET", "/admin/apps/p", "", 200}, {"GET", "/", "", 200}, {"DELETE", "/admin/apps/p", "", 200}, {"GET", "/admin/apps/p", "", 404}} {
+	}{{"GET", "/admin/apps/missing", "", 404}, {"POST", "/admin/apps", "{", 400}, {"POST", "/admin/apps", `{"name":"p","domain":"p.example","serviceName":"p","rpcTimeout":"1s","idl":{"type":"zip","url":"https://example.com/idl.zip"}}`, 200}, {"POST", "/admin/apps/p/update", "", 200}, {"POST", "/admin/apps/p/update", `{"rpcTimeout":"2s"}`, 200}, {"POST", "/admin/apps/p/update", `{"unexpected":true}`, 400}, {"GET", "/admin/apps/p", "", 200}, {"GET", "/", "", 200}, {"DELETE", "/admin/apps/p", "", 200}, {"GET", "/admin/apps/p", "", 404}} {
 		var body *ut.Body
 		if tc.body != "" {
 			body = &ut.Body{Body: strings.NewReader(tc.body), Len: len(tc.body)}

@@ -12,10 +12,11 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/kitex/pkg/kerrors"
+	common "github.com/iamzhangxin/rpcxcommon/errors"
 	"github.com/iamzhangxin/xuandu-gateway/internal/config"
 	"github.com/iamzhangxin/xuandu-gateway/internal/idl"
+	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	rt "github.com/iamzhangxin/xuandu-gateway/internal/runtime"
-	common "github.com/iamzhangxin/rpcxcommon/errors"
 )
 
 func TestRequestLogDiagnostics(t *testing.T) {
@@ -32,13 +33,13 @@ func TestRequestLogDiagnostics(t *testing.T) {
 			manager := rt.NewManager()
 			defer manager.Close(context.Background())
 			cli := &fakeClient{err: tc.err}
-			manager.ReplaceApp("product", &rt.ServiceRuntime{AppName: "product", ServiceName: "product-service", Revision: "revision", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "POST", Path: "/products/:id", RPCService: "Product", RPCMethod: "Get", IDLPath: "idl/product.thrift"}}, Client: cli})
+			manager.ReplaceApp("product", &rt.ServiceRuntime{Config: metadata.App{Domain: "product.example"}, AppName: "product", ServiceName: "product-service", Revision: "revision", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "POST", Path: "/products/:id", RPCService: "Product", RPCMethod: "Get", IDLPath: "idl/product.thrift"}}, Client: cli})
 			h := NewHandler(&config.Config{Server: config.ServerConfig{MaxRequestBodyBytes: 1024}}, manager)
 			var logs bytes.Buffer
 			h.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 			engine := server.New()
 			engine.NoRoute(h.Serve)
-			res := ut.PerformRequest(engine.Engine, "POST", "/products/123?token=secret-query&id=private-query-a&id=private-query-b", &ut.Body{Body: strings.NewReader(tc.body), Len: len(tc.body)})
+			res := ut.PerformRequest(engine.Engine, "POST", "/products/123?token=secret-query&id=private-query-a&id=private-query-b", &ut.Body{Body: strings.NewReader(tc.body), Len: len(tc.body)}, ut.Header{Key: "Host", Value: "product.example"}, ut.Header{Key: "X-App-Code", Value: "product"})
 			var event map[string]any
 			if err := json.Unmarshal(logs.Bytes(), &event); err != nil {
 				t.Fatal(err)

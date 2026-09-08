@@ -17,6 +17,8 @@ import (
 
 func main() {
 	url := flag.String("url", "", "HTTP endpoint")
+	appCode := flag.String("app-code", "", "application code (X-App-Code)")
+	domain := flag.String("host", "", "optional application Host override")
 	body := flag.String("body", `{}`, "JSON request body")
 	duration := flag.Duration("duration", 30*time.Second, "duration")
 	workers := flag.Int("concurrency", 16, "workers")
@@ -44,6 +46,10 @@ func main() {
 					panic(e)
 				}
 				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-App-Code", *appCode)
+				if *domain != "" {
+					req.Host = *domain
+				}
 				r, e := client.Do(req)
 				if ctx.Err() != nil {
 					if r != nil {

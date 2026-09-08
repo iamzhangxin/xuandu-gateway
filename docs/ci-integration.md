@@ -17,8 +17,10 @@ curl --fail-with-body --max-time 130 \
 下载 URL 不持久化；其他副本和重启恢复读取已保存契约并核对摘要。
 
 - 200：更新成功，changed=false 表示 ZIP 字节摘要和配置均未变化。
-- 409：路由或元数据版本冲突，检查状态后重新提交。
+- 409：应用内路由、域名或元数据版本冲突，检查状态后重新提交。
 - 422：下载、ZIP、文件路径、IDL 或 Runtime 构建失败；保留旧版本。
 - 超时不能证明事务没提交，应 GET 应用检查 resolvedRevision。
+
+已有应用若缺少域名，可在更新 JSON 中加入 `"domain":"product.example.com"`；HTTP 调用须携带匹配的 Host 与 X-App-Code，MCP 仅校验应用域名和其独立 Key。
 
 无 IDL 变化的业务发版无需网关更新。网关不管理代码仓库或仓库权限。

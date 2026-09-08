@@ -29,6 +29,10 @@ func reply(c *app.RequestContext, v any, e error) {
 	status, code, msg := 422, "INVALID_CONTRACT", "contract validation or build failed"
 	var conflict *router.ConflictError
 	switch {
+	case errors.Is(e, metadata.ErrInvalidDomain):
+		status, code, msg = 422, "INVALID_DOMAIN", "请输入有效域名或 IP，不包含协议、端口或路径"
+	case errors.Is(e, metadata.ErrDomainConflict):
+		status, code, msg = 409, "DOMAIN_CONFLICT", "该域名已绑定其他应用"
 	case errors.Is(e, metadata.ErrNotFound):
 		status, code, msg = 404, "APP_NOT_FOUND", "application not found"
 	case errors.Is(e, metadata.ErrConflict):

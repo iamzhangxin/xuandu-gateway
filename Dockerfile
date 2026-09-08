@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /xuand
 FROM alpine:3.23 AS runtime-base
 RUN apk add --no-cache ca-certificates && \
     addgroup -g 10001 gateway && adduser -D -u 10001 -G gateway gateway && \
-    mkdir -p /etc/xuandu
+    mkdir -p /etc/xuandu /app/logs && chown 10001:10001 /app/logs
 USER 10001:10001
 EXPOSE 8080 8081 9090
 ENTRYPOINT ["/usr/local/bin/xuandu"]

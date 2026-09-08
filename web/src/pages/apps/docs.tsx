@@ -76,6 +76,7 @@ export default function APIDocs() {
    <Tree key={`${name}:${query}:${doc?.info.version}`} blockNode defaultExpandAll selectedKeys={entry ? [entry.key] : []} onSelect={keys => { if (keys.length) setSelected(String(keys[0])); }} treeData={groups.map(group => ({ key: `service:${group}`, selectable: false, title: <strong>{group} <span className="muted">({filtered.filter(e => (e.op.tags?.[0] || '未分组') === group).length})</span></strong>, children: filtered.filter(e => (e.op.tags?.[0] || '未分组') === group).map(e => ({ key: e.key, title: <span className="docs-tree-item" title={`${e.method.toUpperCase()} ${e.path} · ${e.op.summary}`}><Tag color={colors[e.method]}>{e.method.toUpperCase()}</Tag><span>{e.op.summary || e.path}</span></span> })) }))} />
    {!loading && !filtered.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无接口" />}
   </aside><main className="docs-content" key={entry?.key}>
+   {name && <Alert type="info" title={`应用域名：${apps.find(a => a.name === name)?.domain || '待配置'} · 请求头 X-App-Code: ${name}`} showIcon style={{ marginBottom: 16 }} />}
    {(error || catalogError) && <Alert type="error" title="文档加载失败" description={error || catalogError} showIcon />}
    {loading && <Spin />}{!loading && !entry && !error && <Empty description={query ? '没有匹配的接口' : '选择应用查看接口文档'} />}
    {doc && entry && <>

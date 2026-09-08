@@ -25,12 +25,15 @@ export default function AppDetail() {
  return <PageContainer title={data.name} subTitle="应用详情" onBack={() => history.push('/apps')}
   breadcrumbRender={false}
   extra={[<Button key="docs" onClick={() => history.push(`/docs/${encodeURIComponent(name)}`)}>接口文档</Button>,<Button key="refresh" icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>,
-   <Button key="update" type="primary" icon={<UploadOutlined />} onClick={() => setOpen(true)}>更新契约</Button>]}>
+   <Button key="update" type="primary" icon={<UploadOutlined />} onClick={() => setOpen(true)}>更新应用</Button>]}>
   {error && <Alert type="error" title="刷新失败，当前显示上次加载的数据" description={error} showIcon style={{ marginBottom: 16 }} />}
-  {data.runtimeStatus === 'degraded' && <Alert type="warning" title={data.currentRevision ? "最近一次加载未成功，以下路由来自当前可用版本" : "契约加载失败，当前没有可用路由；请重新导入 ZIP 契约"} showIcon style={{ marginBottom: 16 }} />}
+  {!data.domain && <Alert type="warning" title="请更新应用并配置域名，配置完成后才能调用 HTTP 接口，无需重新上传契约。" showIcon style={{ marginBottom: 16 }} />}
+  {data.domain && data.runtimeStatus === 'degraded' && <Alert type="warning" title={data.currentRevision ? "最近一次加载未成功，以下路由来自当前可用版本" : "契约加载失败，当前没有可用路由；请重新导入 ZIP 契约"} showIcon style={{ marginBottom: 16 }} />}
 
   <Card title="应用概览" className="overview-card"><Descriptions column={{ xs: 1, sm: 2, lg: 4 }} items={[
    { key: 'name', label: '应用', children: data.name }, { key: 'service', label: '服务', children: data.serviceName },
+   { key: 'domain', label: '域名', children: data.domain || '待配置' },
+   { key: 'code', label: 'X-App-Code', children: <Typography.Text copyable>{data.name}</Typography.Text> },
    { key: 'state', label: '状态', children: <StateTag state={data.runtimeStatus} /> }, { key: 'count', label: '路由数', children: data.routes?.length || 0 },
    { key: 'version', label: '版本 · SHA-256', span: 2, children: <Digest value={revision(data)} /> },
    { key: 'timeout', label: 'RPC 超时', children: data.rpcTimeout }, { key: 'updated', label: '最近更新', children: updatedAt(data.lastUpdateTime) },

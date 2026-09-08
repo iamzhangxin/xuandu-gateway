@@ -37,7 +37,7 @@ func TestCatalogTransaction(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	a := &App{Name: "p", ServiceName: "p", RPCTimeout: "1s", Enabled: true, CatalogIndex: 17, IDL: IDLSource{Type: "zip", URL: "https://example.com/idl.zip", ResolvedRevision: strings.Repeat("a", 64)}}
+	a := &App{Name: "p", Domain: "p.example", ServiceName: "p", RPCTimeout: "1s", Enabled: true, CatalogIndex: 17, IDL: IDLSource{Type: "zip", URL: "https://example.com/idl.zip", ResolvedRevision: strings.Repeat("a", 64)}}
 	if e = s.CompareAndSwap(context.Background(), a, 8); e != nil {
 		t.Fatal(e)
 	}

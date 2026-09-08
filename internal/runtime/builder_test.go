@@ -18,7 +18,7 @@ func TestBuilderAndClose(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	a := &metadata.App{Name: "p", ServiceName: "p", RPCTimeout: "1s", IDL: metadata.IDLSource{Type: "zip", URL: "https://example.com/idl.zip", ResolvedRevision: strings.Repeat("a", 64)}}
+	a := &metadata.App{Name: "p", Domain: "p.example", ServiceName: "p", RPCTimeout: "1s", IDL: metadata.IDLSource{Type: "zip", URL: "https://example.com/idl.zip", ResolvedRevision: strings.Repeat("a", 64)}}
 	b := NewBuilder(consul.DefaultConfig())
 	r, e := b.Build(context.Background(), a, &archiveidl.Revision{Digest: a.IDL.ResolvedRevision}, bundles, routes)
 	if e != nil {

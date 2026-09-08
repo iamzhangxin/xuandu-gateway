@@ -14,6 +14,7 @@ go test ./internal/router -bench . -benchmem -run '^$' -count 5
 
 ```sh
 go run ./benchmark/load -url http://127.0.0.1:8080/api/product/detail \
+  -host product.example.com -app-code product \
   -body '{"name":"benchmark"}' -duration 60s -concurrency 32
 ```
 

@@ -14,6 +14,7 @@
 ```json
 {
   "name": "product",
+  "domain": "product.example.com",
   "serviceName": "product",
   "enabled": true,
   "rpcTimeout": "3s",
@@ -45,7 +46,7 @@ Bootstrap 包括 server、consul、admin、mcp；Consul 地址从 CONSUL_HTTP_AD
 4. 校验 include 闭包，找到所有 service 文件。
 5. 从 annotation 提取各文件 HTTP 路由。
 6. 各文件建立独立 DynamicGo-aware HTTPThriftGeneric + Kitex Client。
-7. 合并路由，校验包内、跨应用冲突。
+7. 合并应用内路由，校验包内路径冲突和跨应用域名冲突；不同域名允许相同 HTTP 方法/路径。
 8. 持久化完整 ZIP，最后写入完成标记。
 9. 成功后统一 CAS 和发布；任何失败关闭已创建的所有候选客户端。
 
@@ -66,11 +67,15 @@ ZIP 按 256 KiB 分块写入 `<metadataPrefix>-contracts/<sha256>/`，以 CAS �
 
 POST /admin/apps；GET /admin/apps；GET /admin/apps/:name；
 POST /admin/apps/:name/update；DELETE /admin/apps/:name。
-Update 支持可选 serviceName/rpcTimeout/enabled/idl 补丁；空请求重新检查当前 ZIP。
+Update 支持可选 domain/serviceName/rpcTimeout/enabled/idl 补丁；空请求重新检查当前 ZIP。
 旧 Git 记录仅供管理读取/删除，通过 Update 提供 ZIP URL 后迁移，不进行自动 Git 拉取。
 
 Hertz 保留 healthz、readyz、NoRoute catch-all。业务请求持有快照 lease；旧应用的
 所有客户端在最后一个旧 lease 释放后关闭。SIGTERM 停止管理写入、取消构建，25 秒退出期限。
 
 错误：下载/包/IDL 构建失败 422，冲突 409；业务 400/404/413/502/503/504 保持原语义。
-日志不打印下载 URL 的 query、认证头、请求体或响应体。
+HTTP 业务请求先通过 Host 找应用，再校验唯一的 X-App-Code 与 name 相等，再匹配应用内路由。MCP 入口同样校验关联应用域名，但不要求 X-App-Code，仍执行原有 Key 授权。旧记录缺少 domain 时保留管理读取和编辑，补充域名后才能发布 Runtime。
+
+普通契约构建失败保留 LKG；观察到域名变更、停用或删除时先撤销旧身份的路由，再尝试恢复新版本，不能用 LKG 保留已撤销的域名。更新通过目录 CAS 保护域名唯一性，副本通过 Watch 同步，传播期间不是所有副本同时切换。
+
+日志默认写入 /app/logs/xuandu.log 并保留 stdout，50 MiB 轮转、5 个备份。可用 XUANDU_LOG_DIR 覆盖；K8s 使用每 Pod 的 emptyDir。日志不打印下载 URL 的 query、认证头、请求体或响应体。

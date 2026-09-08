@@ -20,6 +20,7 @@ import (
 
 	"github.com/iamzhangxin/xuandu-gateway/internal/config"
 	"github.com/iamzhangxin/xuandu-gateway/internal/idl"
+	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	rt "github.com/iamzhangxin/xuandu-gateway/internal/runtime"
 )
 
@@ -53,7 +54,7 @@ func (f *fakeClient) GenericCall(ctx context.Context, m string, r any, _ ...call
 func TestHandler(t *testing.T) {
 	m := rt.NewManager()
 	cli := &fakeClient{}
-	m.ReplaceApp("p", &rt.ServiceRuntime{AppName: "p", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "POST", Path: "/p/:id"}}, Client: cli})
+	m.ReplaceApp("p", &rt.ServiceRuntime{Config: metadata.App{Domain: "p.example"}, AppName: "p", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "POST", Path: "/p/:id"}}, Client: cli})
 	defer m.Close(context.Background())
 	h := NewHandler(&config.Config{Server: config.ServerConfig{MaxRequestBodyBytes: 16}}, m)
 	engine := server.New()
@@ -63,7 +64,7 @@ func TestHandler(t *testing.T) {
 		path, data string
 		want       int
 	}{{"/p/abc?x=1", `{"name":"x"}`, 201}, {"/none", `{}`, 404}, {"/p/1", `bad`, 400}, {"/p/1", `{"long":"1234567890"}`, 413}} {
-		r := ut.PerformRequest(engine.Engine, "POST", tc.path, body(tc.data))
+		r := ut.PerformRequest(engine.Engine, "POST", tc.path, body(tc.data), ut.Header{Key: "Host", Value: "p.example"}, ut.Header{Key: "X-App-Code", Value: "p"})
 		if r.Code != tc.want {
 			t.Fatalf("%+v: %d", tc, r.Code)
 		}
@@ -72,7 +73,7 @@ func TestHandler(t *testing.T) {
 		t.Fatal("request path/method changed", cli)
 	}
 	cli.err = kerrors.ErrNoInstance
-	r := ut.PerformRequest(engine.Engine, "POST", "/p/1", body(`{}`))
+	r := ut.PerformRequest(engine.Engine, "POST", "/p/1", body(`{}`), ut.Header{Key: "Host", Value: "p.example"}, ut.Header{Key: "X-App-Code", Value: "p"})
 	if r.Code != 503 {
 		t.Fatal(r.Code)
 	}
@@ -104,11 +105,11 @@ func TestResponseEnvelope(t *testing.T) {
 			m := rt.NewManager()
 			defer m.Close(ctx)
 			cli := &fakeClient{err: tc.err, response: tc.out}
-			m.ReplaceApp("p", &rt.ServiceRuntime{AppName: "p", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "GET", Path: "/p"}}, Client: cli})
+			m.ReplaceApp("p", &rt.ServiceRuntime{Config: metadata.App{Domain: "p.example"}, AppName: "p", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "GET", Path: "/p"}}, Client: cli})
 			h := NewHandler(&config.Config{Server: config.ServerConfig{MaxRequestBodyBytes: 1024}}, m)
 			engine := server.New()
 			engine.NoRoute(h.Serve)
-			res := ut.PerformRequest(engine.Engine, "GET", "/p", nil)
+			res := ut.PerformRequest(engine.Engine, "GET", "/p", nil, ut.Header{Key: "Host", Value: "p.example"}, ut.Header{Key: "X-App-Code", Value: "p"})
 			var envelope struct {
 				Code    string          `json:"code"`
 				Message string          `json:"message"`
@@ -128,7 +129,7 @@ func TestUserIDHeaderPropagation(t *testing.T) {
 	m := rt.NewManager()
 	defer m.Close(context.Background())
 	cli := &fakeClient{}
-	m.ReplaceApp("p", &rt.ServiceRuntime{AppName: "p", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "GET", Path: "/p"}}, Client: cli})
+	m.ReplaceApp("p", &rt.ServiceRuntime{Config: metadata.App{Domain: "p.example"}, AppName: "p", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "GET", Path: "/p"}}, Client: cli})
 	h := NewHandler(&config.Config{Server: config.ServerConfig{MaxRequestBodyBytes: 1024}}, m)
 	engine := server.New()
 	engine.NoRoute(h.Serve)
@@ -139,7 +140,7 @@ func TestUserIDHeaderPropagation(t *testing.T) {
 		{"Authorization", "Bearer ignored", ""},
 		{"X-User-ID", "   ", ""},
 	} {
-		response := ut.PerformRequest(engine.Engine, "GET", "/p", nil, ut.Header{Key: tc.header, Value: tc.value})
+		response := ut.PerformRequest(engine.Engine, "GET", "/p", nil, ut.Header{Key: tc.header, Value: tc.value}, ut.Header{Key: "Host", Value: "p.example"}, ut.Header{Key: "X-App-Code", Value: "p"})
 		if response.Code != 201 || cli.userID != tc.want {
 			t.Fatalf("header %s: HTTP %d, user ID %q", tc.header, response.Code, cli.userID)
 		}

@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"strings"
@@ -20,7 +21,7 @@ func fixture(t *testing.T) (*admin.Service, *testutil.Store, *testutil.Fetcher, 
 	f := &testutil.Fetcher{Revision: &archiveidl.Revision{Digest: strings.Repeat("a", 64), Files: map[string]string{"idl/main.thrift": `struct Q {1:string id} service S {Q Get(1:Q req)(api.get="/p")}`}}}
 	b := &testutil.Builder{}
 	s := admin.NewService(store, f, b, rt.NewManager())
-	req := admin.CreateAppRequest{Name: "product", ServiceName: "product", RPCTimeout: "1s", IDL: admin.ImportSource{Type: "zip", URL: "https://example.com/idl.zip"}}
+	req := admin.CreateAppRequest{Name: "product", Domain: "product.example", ServiceName: "product", RPCTimeout: "1s", IDL: admin.ImportSource{Type: "zip", URL: "https://example.com/idl.zip"}}
 	t.Cleanup(func() { s.Manager.Close(context.Background()) })
 	return s, store, f, b, req
 }
@@ -63,7 +64,7 @@ func TestCreateAndUpdateLKG(t *testing.T) {
 	if e != nil || !result.Changed {
 		t.Fatal(result, e)
 	}
-	if _, ok := s.Manager.Load().Routes.Match("GET", "/new"); !ok {
+	if _, ok := s.Manager.Load().Match("product", "GET", "/new"); !ok {
 		t.Fatal("route not updated")
 	}
 }
@@ -184,7 +185,7 @@ func TestFailedCreateDoesNotPoisonReadiness(t *testing.T) {
 func TestMigrateLegacySource(t *testing.T) {
 	s, store, _, _, req := fixture(t)
 	ctx := context.Background()
-	legacy := &metadata.App{Name: req.Name, ServiceName: req.ServiceName, RPCTimeout: "1s", Enabled: true, IDL: metadata.IDLSource{Type: "git", ResolvedRevision: strings.Repeat("a", 40)}}
+	legacy := &metadata.App{Name: req.Name, Domain: req.Domain, ServiceName: req.ServiceName, RPCTimeout: "1s", Enabled: true, IDL: metadata.IDLSource{Type: "git", ResolvedRevision: strings.Repeat("a", 40)}}
 	store.Create(ctx, legacy)
 	s.Reconcile(ctx, []*metadata.App{legacy})
 	if ok, _ := s.Ready(); ok {
@@ -271,5 +272,125 @@ func TestOpenAPIUsesCurrentRevisionAfterFailedUpdate(t *testing.T) {
 	}
 	if _, err := s.OpenAPI(ctx, "missing"); !errors.Is(err, metadata.ErrNotFound) {
 		t.Fatal(err)
+	}
+}
+
+func TestDomainsPublicationAndLegacyUpgrade(t *testing.T) {
+	s, store, f, b, req := fixture(t)
+	ctx := context.Background()
+	req.Domain = "Product.Example."
+	if _, err := s.CreateApp(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := store.Get(ctx, req.Name)
+	if a.Domain != "product.example" {
+		t.Fatal("domain not normalized")
+	}
+	req.Name = "second"
+	req.Domain = "second.example"
+	if _, err := s.CreateApp(ctx, req); err != nil {
+		t.Fatal("same path on another domain must be accepted", err)
+	}
+	downloads := len(f.Refs)
+	domain := "new.example"
+	if _, err := s.UpdateAppWithRequest(ctx, "product", admin.UpdateAppRequest{Domain: &domain}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Refs) != downloads {
+		t.Fatal("domain change re-downloaded contract")
+	}
+	if s.Manager.Load().Domains["product.example"] != "" || s.Manager.Load().Domains[domain] != "product" {
+		t.Fatal("old host binding retained")
+	}
+	enabled := false
+	if _, err := s.UpdateAppWithRequest(ctx, "product", admin.UpdateAppRequest{Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateAppWithRequest(ctx, "second", admin.UpdateAppRequest{Domain: &domain}); err == nil {
+		t.Fatal("disabled application's domain was reassigned")
+	}
+	// Simulate persisted, pre-domain metadata on restart.
+	apps, _ := store.List(ctx)
+	for _, a := range apps {
+		a.Domain = ""
+		if err := store.CompareAndSwap(ctx, a, a.ModifyIndex); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apps, _ = store.List(ctx)
+	s.Reconcile(ctx, apps)
+	if len(s.Manager.Load().Runtimes) != 0 {
+		t.Fatal("legacy identities remained routable")
+	}
+	if ready, _ := s.Ready(); !ready {
+		t.Fatal("unconfigured legacy domain blocked console through Kubernetes readiness")
+	}
+	detail, err := s.Get(ctx, "second")
+	if err != nil || detail.RuntimeStatus != "unconfigured" {
+		t.Fatal("missing unconfigured status", err)
+	}
+	domain = "restored.example"
+	if _, err := s.UpdateAppWithRequest(ctx, "second", admin.UpdateAppRequest{Domain: &domain}); err != nil {
+		t.Fatal(err)
+	}
+	if s.Manager.Load().Domains[domain] != "second" {
+		t.Fatal("legacy contract not restored")
+	}
+	// A newly observed domain cannot retain an old host when its rebuild fails.
+	apps, _ = store.List(ctx)
+	for _, a := range apps {
+		if a.Name == "second" {
+			a.Domain = "changed.example"
+		}
+	}
+	b.Fail = true
+	s.Reconcile(ctx, apps)
+	if s.Manager.Load().Domains[domain] != "" {
+		t.Fatal("LKG retained obsolete identity")
+	}
+}
+
+func TestOpenAPIApplicationIdentity(t *testing.T) {
+	s, _, _, _, req := fixture(t)
+	if _, err := s.CreateApp(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := s.OpenAPI(context.Background(), req.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output struct {
+		Servers []struct{ URL string }
+		Paths   map[string]map[string]struct {
+			Parameters []struct {
+				Name     string
+				In       string
+				Required bool
+				Schema   struct{ Example string }
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Servers) != 2 || output.Servers[0].URL != "https://product.example" {
+		t.Fatal("missing application servers")
+	}
+	for _, methods := range output.Paths {
+		for _, op := range methods {
+			found := false
+			for _, p := range op.Parameters {
+				if p.Name == "X-App-Code" && p.In == "header" && p.Required && p.Schema.Example == req.Name {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("missing application header")
+			}
+		}
 	}
 }

@@ -15,12 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/iamzhangxin/xuandu-gateway/internal/config"
 	"github.com/iamzhangxin/xuandu-gateway/internal/executor"
 	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	"github.com/iamzhangxin/xuandu-gateway/internal/openapi"
 	rt "github.com/iamzhangxin/xuandu-gateway/internal/runtime"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type compiledServer struct {
@@ -469,6 +469,23 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	lease := s.manager.Acquire()
+	if lease == nil {
+		http.Error(w, "Gateway unavailable", 503)
+		return
+	}
+	defer lease.Release()
+	runtime := lease.Snapshot.Runtimes[cs.Config.App]
+	if runtime == nil || runtime.Revision != cs.Revision {
+		http.Error(w, "MCP contract synchronizing", 503)
+		return
+	}
+	domain, err := metadata.RequestDomain(r.Host)
+	if err != nil || lease.Snapshot.Domains[domain] != cs.Config.App {
+		slog.Warn("mcp request rejected", "server_id", id, "app", cs.Config.App, "error_reason", "domain_mismatch", "host", r.Host, "status", 403)
+		http.Error(w, "MCP domain forbidden", http.StatusForbidden)
+		return
+	}
 	// Browser access is deliberately same-origin in v1. Non-browser clients omit Origin.
 	if origin := r.Header.Get("Origin"); origin != "" {
 		u, err := url.Parse(origin)
@@ -514,17 +531,6 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "MCP access denied", 403)
 		return
 	}
-	lease := s.manager.Acquire()
-	if lease == nil {
-		http.Error(w, "Gateway unavailable", 503)
-		return
-	}
-	defer lease.Release()
-	runtime := lease.Snapshot.Runtimes[cs.Config.App]
-	if runtime == nil || runtime.Revision != cs.Revision {
-		http.Error(w, "MCP contract synchronizing", 503)
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	scope := &requestScope{Runtime: runtime, KeyId: keyId, ServerId: id, Context: ctx, Snapshot: lease.Snapshot}
@@ -561,7 +567,7 @@ func (s *Service) call(ctx context.Context, b *Binding, raw json.RawMessage) *sd
 	if e != nil {
 		return failure("400001", e.Error())
 	}
-	target, ok := scope.Snapshot.Routes.Match(req.Method, req.URL.Path)
+	target, ok := scope.Snapshot.Match(scope.Runtime.AppName, req.Method, req.URL.Path)
 	if !ok || target.AppName != scope.Runtime.AppName || target.Route != b.Route {
 		return failure("400001", "参数未匹配所选接口")
 	}

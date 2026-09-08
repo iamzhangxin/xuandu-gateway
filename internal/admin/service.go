@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +58,7 @@ type ImportSource struct {
 
 type CreateAppRequest struct {
 	Name        string       `json:"name"`
+	Domain      string       `json:"domain"`
 	ServiceName string       `json:"serviceName"`
 	RPCTimeout  string       `json:"rpcTimeout"`
 	IDL         ImportSource `json:"idl"`
@@ -112,6 +114,10 @@ func (s *Service) record(a *metadata.App, e error) {
 	if e != nil {
 		v.RuntimeStatus = "degraded"
 		v.LastUpdateResult = "build or publication failed"
+		if a.IDL.Type == "zip" && a.Domain == "" {
+			v.RuntimeStatus = "unconfigured"
+			v.LastUpdateResult = "application domain required"
+		}
 	}
 	s.status[a.Name] = v
 	slog.Info("contract update", "app", a.Name, "current_revision", v.CurrentRevision, "target_revision", v.TargetRevision, "result", v.LastUpdateResult, "route_count", v.RouteCount)
@@ -133,10 +139,13 @@ func (s *Service) CreateApp(ctx context.Context, req CreateAppRequest) (a *metad
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	a = &metadata.App{Name: req.Name, ServiceName: req.ServiceName, RPCTimeout: req.RPCTimeout, IDL: metadata.IDLSource{Type: req.IDL.Type, URL: req.IDL.URL}, Enabled: enabled}
+	a = &metadata.App{Name: req.Name, Domain: req.Domain, ServiceName: req.ServiceName, RPCTimeout: req.RPCTimeout, IDL: metadata.IDLSource{Type: req.IDL.Type, URL: req.IDL.URL}, Enabled: enabled}
 	a.IDL.ResolvedRevision = ""
 	if a.IDL.Type == "" {
 		a.IDL.Type = "zip"
+	}
+	if a.Domain, err = metadata.NormalizeDomain(a.Domain); err != nil {
+		return nil, err
 	}
 	if err = a.Validate(); err != nil {
 		return nil, err
@@ -149,6 +158,9 @@ func (s *Service) CreateApp(ctx context.Context, req CreateAppRequest) (a *metad
 	if _, err = s.Store.Get(ctx, a.Name); err == nil {
 		return nil, metadata.ErrConflict
 	} else if !errors.Is(err, metadata.ErrNotFound) {
+		return nil, err
+	}
+	if err = s.checkDomain(ctx, a); err != nil {
 		return nil, err
 	}
 	candidate, err := s.build(ctx, a, "")
@@ -172,6 +184,7 @@ func (s *Service) CreateApp(ctx context.Context, req CreateAppRequest) (a *metad
 }
 
 type UpdateAppRequest struct {
+	Domain      *string       `json:"domain,omitempty"`
 	ServiceName *string       `json:"serviceName,omitempty"`
 	RPCTimeout  *string       `json:"rpcTimeout,omitempty"`
 	Enabled     *bool         `json:"enabled,omitempty"`
@@ -200,6 +213,9 @@ func (s *Service) UpdateAppWithRequest(ctx context.Context, name string, req Upd
 	a.CatalogIndex = epoch
 	old := a.IDL.ResolvedRevision
 	original := *a
+	if req.Domain != nil {
+		a.Domain = *req.Domain
+	}
 	if req.ServiceName != nil {
 		a.ServiceName = *req.ServiceName
 	}
@@ -218,7 +234,13 @@ func (s *Service) UpdateAppWithRequest(ctx context.Context, name string, req Upd
 			return nil, err
 		}
 	}
+	if a.Domain, err = metadata.NormalizeDomain(a.Domain); err != nil {
+		return nil, err
+	}
 	if err = a.Validate(); err != nil {
+		return nil, err
+	}
+	if err = s.checkDomain(ctx, a); err != nil {
 		return nil, err
 	}
 	a.IDL.URL = ""
@@ -343,6 +365,16 @@ func (s *Service) reconcileLocked(ctx context.Context, apps []*metadata.App) {
 		return
 	}
 	wanted := map[string]bool{}
+	desired := map[string]*metadata.App{}
+	for _, a := range apps {
+		desired[a.Name] = a
+	}
+	for n, r := range s.Manager.Load().Runtimes {
+		a := desired[n]
+		if a == nil || !a.Enabled || a.Domain != r.Config.Domain {
+			_ = s.Manager.RemoveApp(n)
+		}
+	}
 	for _, target := range apps {
 		a := *target
 		wanted[a.Name] = true
@@ -428,11 +460,26 @@ func (s *Service) refresh(ctx context.Context, replacing string) (uint64, error)
 	s.reconcileLocked(ctx, apps)
 	for _, a := range apps {
 		r := s.Manager.Load().Runtimes[a.Name]
-		if a.IDL.Type == "zip" && a.Name != replacing && a.Enabled && (r == nil || !same(r.Config, *a)) {
+		if a.Domain != "" && a.IDL.Type == "zip" && a.Name != replacing && a.Enabled && (r == nil || !same(r.Config, *a)) {
 			return 0, fmt.Errorf("local catalog has not converged")
 		}
 	}
 	return epoch, nil
+}
+
+// The catalog CAS in Create/Update guards this read against concurrent replicas.
+func (s *Service) checkDomain(ctx context.Context, candidate *metadata.App) error {
+	apps, err := s.Store.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, a := range apps {
+		domain, _ := metadata.NormalizeDomain(a.Domain)
+		if a.Name != candidate.Name && domain == candidate.Domain {
+			return metadata.ErrDomainConflict
+		}
+	}
+	return nil
 }
 
 func (s *Service) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -456,5 +503,41 @@ func (s *Service) OpenAPI(ctx context.Context, name string) (openapi.Object, err
 	if err != nil {
 		return nil, err
 	}
-	return openapi.Generate(name, revision, contract.Files)
+	doc, err := openapi.Generate(name, revision, contract.Files)
+	if err != nil {
+		return nil, err
+	}
+	domain := detail.Domain
+	if current := s.Manager.Load().Runtimes[name]; current != nil && current.Revision == revision {
+		domain = current.Config.Domain
+	}
+	if domain != "" {
+		authority := domain
+		if strings.Contains(authority, ":") {
+			authority = "[" + authority + "]"
+		}
+		doc["servers"] = []openapi.Object{{"url": "https://" + authority}, {"url": "http://" + authority}}
+	}
+	paths, _ := doc["paths"].(openapi.Object)
+	for _, path := range paths {
+		methods, _ := path.(openapi.Object)
+		for _, value := range methods {
+			op, ok := value.(openapi.Object)
+			if !ok {
+				continue
+			}
+			params, _ := op["parameters"].([]openapi.Object)
+			filtered := make([]openapi.Object, 0, len(params)+1)
+			for _, p := range params {
+				if p["in"] == "header" {
+					if n, _ := p["name"].(string); strings.EqualFold(n, "X-App-Code") {
+						continue
+					}
+				}
+				filtered = append(filtered, p)
+			}
+			op["parameters"] = append(filtered, openapi.Object{"name": "X-App-Code", "in": "header", "required": true, "description": "应用编码，必须与请求域名绑定的应用一致", "schema": openapi.Object{"type": "string", "enum": []string{name}, "example": name}})
+		}
+	}
+	return doc, nil
 }

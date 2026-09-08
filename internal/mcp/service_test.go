@@ -14,14 +14,14 @@ import (
 	"github.com/cloudwego/kitex/client/callopt"
 	"github.com/cloudwego/kitex/pkg/generic"
 	"github.com/cloudwego/kitex/pkg/kerrors"
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/iamzhangxin/rpcxcommon/rpcmeta"
 	"github.com/iamzhangxin/xuandu-gateway/internal/archiveidl"
 	"github.com/iamzhangxin/xuandu-gateway/internal/config"
 	"github.com/iamzhangxin/xuandu-gateway/internal/idl"
 	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	"github.com/iamzhangxin/xuandu-gateway/internal/openapi"
 	rt "github.com/iamzhangxin/xuandu-gateway/internal/runtime"
-	"github.com/iamzhangxin/rpcxcommon/rpcmeta"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const fixture = `namespace go api
@@ -120,11 +120,11 @@ func setup(t *testing.T) (*Service, *httptest.Server, *fakeRPC, *memoryRepo) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	app := &metadata.App{Name: "product", Enabled: true, ServiceName: "product", IDL: metadata.IDLSource{Type: "zip", ResolvedRevision: strings.Repeat("a", 64)}}
+	app := &metadata.App{Name: "product", Domain: "127.0.0.1", Enabled: true, ServiceName: "product", IDL: metadata.IDLSource{Type: "zip", ResolvedRevision: strings.Repeat("a", 64)}}
 	revision := &archiveidl.Revision{Digest: app.IDL.ResolvedRevision, Files: files}
 	manager := rt.NewManager()
 	rpc := &fakeRPC{}
-	if e = manager.ReplaceApp(app.Name, &rt.ServiceRuntime{AppName: app.Name, Revision: revision.Digest, Routes: routes, Client: rpc, Timeout: time.Second}); e != nil {
+	if e = manager.ReplaceApp(app.Name, &rt.ServiceRuntime{Config: *app, AppName: app.Name, Revision: revision.Digest, Routes: routes, Client: rpc, Timeout: time.Second}); e != nil {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { manager.Close(context.Background()) })
@@ -228,7 +228,7 @@ func TestRoutingRevocationAndFreshness(t *testing.T) {
 		defer response.Body.Close()
 		return response.StatusCode
 	}
-	if probe("/product/mcp", "", "") != 401 || probe("/test/mcp", "test-key", "") != 404 || probe("/product/mcp", "", "other.example:9090") != 401 {
+	if probe("/product/mcp", "", "") != 401 || probe("/test/mcp", "test-key", "") != 404 || probe("/product/mcp", "", "other.example:9090") != 403 {
 		t.Fatal("routing/auth isolation failed")
 	}
 	repo.mu.Lock()
@@ -340,7 +340,7 @@ func TestSchemaLiteralAndValidationIsolation(t *testing.T) {
 func TestRuntimeRevisionFence(t *testing.T) {
 	s, server, rpc, _ := setup(t)
 	old := s.manager.Load().Runtimes["product"]
-	if e := s.manager.ReplaceApp("product", &rt.ServiceRuntime{AppName: "product", Revision: strings.Repeat("b", 64), Routes: old.Routes, Client: rpc, Timeout: time.Second}); e != nil {
+	if e := s.manager.ReplaceApp("product", &rt.ServiceRuntime{Config: old.Config, AppName: "product", Revision: strings.Repeat("b", 64), Routes: old.Routes, Client: rpc, Timeout: time.Second}); e != nil {
 		t.Fatal(e)
 	}
 	r := httptest.NewRequest("POST", server.URL+"/product/mcp", strings.NewReader(`{}`))
@@ -384,7 +384,7 @@ func TestInflightLeaseAndRequestCancellation(t *testing.T) {
 			s, server, _, _ := setup(t)
 			old := s.manager.Load().Runtimes["product"]
 			block := &blockingRPC{entered: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
-			runtime := &rt.ServiceRuntime{AppName: old.AppName, Revision: old.Revision, Routes: old.Routes, Client: block, Timeout: 5 * time.Second}
+			runtime := &rt.ServiceRuntime{Config: old.Config, AppName: old.AppName, Revision: old.Revision, Routes: old.Routes, Client: block, Timeout: 5 * time.Second}
 			if e := s.manager.ReplaceApp("product", runtime); e != nil {
 				t.Fatal(e)
 			}
@@ -407,7 +407,7 @@ func TestInflightLeaseAndRequestCancellation(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("RPC not reached")
 			}
-			next := &rt.ServiceRuntime{AppName: old.AppName, Revision: strings.Repeat("b", 64), Routes: old.Routes, Client: &fakeRPC{}, Timeout: time.Second}
+			next := &rt.ServiceRuntime{Config: old.Config, AppName: old.AppName, Revision: strings.Repeat("b", 64), Routes: old.Routes, Client: &fakeRPC{}, Timeout: time.Second}
 			if e := s.manager.ReplaceApp("product", next); e != nil {
 				t.Fatal(e)
 			}
@@ -459,10 +459,10 @@ func TestServerAccessMutationPreservesOtherGrants(t *testing.T) {
 	}
 }
 
-func TestPathOnlyRouting(t *testing.T) {
+func TestPathAliasesOnApplicationDomain(t *testing.T) {
 	_, server, _, _ := setup(t)
-	for _, base := range []string{server.URL, strings.Replace(server.URL, "127.0.0.1", "localhost", 1)} {
-		session := connect(t, base+"/product/mcp", "test-key")
+	for _, path := range []string{"/product/mcp", "/alias/mcp"} {
+		session := connect(t, server.URL+path, "test-key")
 		listed, err := session.ListTools(context.Background(), nil)
 		if err != nil || len(listed.Tools) != 1 {
 			t.Fatalf("discovery: %+v %v", listed, err)
@@ -506,15 +506,15 @@ func TestPathRoutingOriginAndExactMatch(t *testing.T) {
 		path, host, origin string
 		status             int
 	}{
-		{"/product/mcp", "gateway.example:8081", "http://gateway.example:8081", 401},
-		{"/product/mcp", "gateway.example", "https://gateway.example", 401},
-		{"/product/mcp", "gateway.example", "https://other.example", 403},
-		{"/product/mcp", "gateway.example", "null", 403},
-		{"/product/mcp", "gateway.example", "https://gateway.example/path", 403},
-		{"/product/mcp", "gateway.example", "https://gateway.example:8081", 403},
-		{"/product/mcp/", "gateway.example", "", 404},
-		{"/product/%6dcp", "gateway.example", "", 404},
-		{"/product/other", "gateway.example", "", 404},
+		{"/product/mcp", "127.0.0.1:8081", "http://127.0.0.1:8081", 401},
+		{"/product/mcp", "127.0.0.1", "https://127.0.0.1", 401},
+		{"/product/mcp", "127.0.0.1", "https://other.example", 403},
+		{"/product/mcp", "127.0.0.1", "null", 403},
+		{"/product/mcp", "127.0.0.1", "https://127.0.0.1/path", 403},
+		{"/product/mcp", "127.0.0.1", "https://127.0.0.1:8081", 403},
+		{"/product/mcp/", "127.0.0.1", "", 404},
+		{"/product/%6dcp", "127.0.0.1", "", 404},
+		{"/product/other", "127.0.0.1", "", 404},
 	} {
 		r := httptest.NewRequest("POST", "http://"+tc.host+tc.path, nil)
 		if tc.origin != "" {
@@ -533,5 +533,59 @@ func TestEndpointPathValidation(t *testing.T) {
 		if _, err := endpointKey(raw); err == nil {
 			t.Errorf("accepted %q", raw)
 		}
+	}
+}
+
+func TestMCPDomainWithoutAppCode(t *testing.T) {
+	s, server, rpc, _ := setup(t)
+	// An unrelated application's identical routes must not interfere with this MCP server.
+	old := s.manager.Load().Runtimes["product"]
+	other := &fakeRPC{}
+	if err := s.manager.ReplaceApp("other", &rt.ServiceRuntime{AppName: "other", Config: metadata.App{Domain: "other.example"}, Revision: old.Revision, Routes: old.Routes, Client: other, Timeout: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		host, code string
+		status     int
+	}{
+		{"127.0.0.1:8081", "", 200}, {"127.0.0.1", "wrong-app-code", 200},
+		{"other.example", "product", 403}, {"localhost", "", 403}, {"unknown.example", "product", 403},
+	} {
+		request := httptest.NewRequest("POST", server.URL+"/product/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_product","arguments":{"spuId":"42"}}}`))
+		request.Host = tc.host
+		request.Header.Set("X-MCP-Key", "test-key")
+		request.Header.Set("X-Forwarded-Host", "127.0.0.1")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		if tc.code != "" {
+			request.Header.Set("X-App-Code", tc.code)
+		}
+		before := rpc.calls
+		response := httptest.NewRecorder()
+		s.ServeHTTP(response, request)
+		if response.Code != tc.status {
+			t.Fatalf("%+v: %d %s", tc, response.Code, response.Body.String())
+		}
+		if tc.status == 200 && rpc.calls != before+1 || tc.status != 200 && rpc.calls != before {
+			t.Fatal("wrong downstream call count")
+		}
+		if other.calls != 0 {
+			t.Fatal("invoked another application")
+		}
+	}
+	// Domain changes revoke the previous hostname even before MCP definitions refresh.
+	next := &rt.ServiceRuntime{AppName: old.AppName, Config: metadata.App{Domain: "new.example"}, Revision: old.Revision, Routes: old.Routes, Client: &fakeRPC{}, Timeout: time.Second}
+	if err := s.manager.ReplaceApp("product", next); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", server.URL+"/product/mcp", nil)
+	request.Header.Set("X-MCP-Key", "test-key")
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, request)
+	if response.Code != 403 {
+		t.Fatalf("old domain still accepted: %d", response.Code)
 	}
 }

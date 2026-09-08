@@ -7,6 +7,7 @@ import (
 	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	rt "github.com/iamzhangxin/xuandu-gateway/internal/runtime"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -70,7 +71,12 @@ func TestLiveOperation(t *testing.T) {
 	if msg := s.current.Load().Servers["live"].Error; msg != "" {
 		t.Fatal(msg)
 	}
-	session := connect(t, server.URL+"/verify/mcp", secret)
+	client := sdk.NewClient(&sdk.Implementation{Name: "gateway-live-test", Version: "1"}, nil)
+	session, e := client.Connect(ctx, &sdk.StreamableClientTransport{Endpoint: server.URL + "/verify/mcp", HTTPClient: &http.Client{Transport: liveDomainTransport{domain: a.Domain, base: keyTransport{secret, http.DefaultTransport}}}, DisableStandaloneSSE: true, MaxRetries: -1}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer session.Close()
 	result, e := session.CallTool(ctx, &sdk.CallToolParams{Name: "verify_operation", Arguments: map[string]any{}})
 	if e != nil {
 		t.Fatal(e)
@@ -82,4 +88,16 @@ func TestLiveOperation(t *testing.T) {
 		t.Fatal("missing structured result")
 	}
 	t.Log("Consul contract -> SDK -> shared executor -> Kitex TTHeader operation succeeded")
+}
+
+// Override only the Host of the local test request; Consul metadata stays untouched.
+type liveDomainTransport struct {
+	domain string
+	base   http.RoundTripper
+}
+
+func (t liveDomainTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Host = t.domain
+	return t.base.RoundTrip(r)
 }

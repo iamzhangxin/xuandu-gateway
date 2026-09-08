@@ -25,6 +25,7 @@ type IDLSource struct {
 type App struct {
 	CatalogIndex uint64    `json:"-"`
 	Name         string    `json:"name"`
+	Domain       string    `json:"domain"`
 	ServiceName  string    `json:"serviceName"`
 	Enabled      bool      `json:"enabled"`
 	RPCTimeout   string    `json:"rpcTimeout"`
@@ -33,6 +34,20 @@ type App struct {
 }
 
 func (a *App) Validate() error {
+	if _, e := NormalizeDomain(a.Domain); e != nil {
+		return e
+	}
+	return a.validateStored()
+}
+
+// Existing catalogs without domains remain editable, but cannot build a runtime.
+func (a *App) validateStored() error {
+	if a.Domain != "" {
+		if _, e := NormalizeDomain(a.Domain); e != nil {
+			return e
+		}
+	}
+
 	if !NamePattern.MatchString(a.Name) || strings.TrimSpace(a.ServiceName) == "" {
 		return fmt.Errorf("invalid application or service name")
 	}
@@ -73,7 +88,7 @@ type Store interface {
 }
 
 // CatalogStore prevents concurrent writes to different apps from publishing
-// overlapping routes based on different replicas' stale snapshots.
+// duplicate domain bindings based on different replicas' stale snapshots.
 type CatalogStore interface {
 	Catalog(context.Context) ([]*App, uint64, error)
 }

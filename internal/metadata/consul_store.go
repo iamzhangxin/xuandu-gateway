@@ -59,7 +59,7 @@ func decode(p *consul.KVPair) (*App, error) {
 		a.ModifyIndex = p.ModifyIndex
 		return &a, nil
 	}
-	if e := a.Validate(); e != nil {
+	if e := a.validateStored(); e != nil {
 		return nil, e
 	}
 	if !RevisionPattern.MatchString(a.IDL.ResolvedRevision) {

@@ -18,11 +18,11 @@ import (
 	"github.com/cloudwego/kitex/server"
 	"github.com/cloudwego/kitex/server/genericserver"
 	consul "github.com/hashicorp/consul/api"
+	common "github.com/iamzhangxin/rpcxcommon/errors"
+	"github.com/iamzhangxin/rpcxcommon/rpcmeta"
 	"github.com/iamzhangxin/xuandu-gateway/internal/archiveidl"
 	"github.com/iamzhangxin/xuandu-gateway/internal/idl"
 	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
-	common "github.com/iamzhangxin/rpcxcommon/errors"
-	"github.com/iamzhangxin/rpcxcommon/rpcmeta"
 )
 
 // Exercise the actual TTHeader wire and generic decoder, including the empty
@@ -76,7 +76,7 @@ func TestBusinessErrorAcrossTTHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &metadata.App{Name: "p", ServiceName: "business-error-wire-test", RPCTimeout: "3s", IDL: metadata.IDLSource{Type: "zip", ResolvedRevision: strings.Repeat("a", 64)}}
+	a := &metadata.App{Name: "p", Domain: "p.example", ServiceName: "business-error-wire-test", RPCTimeout: "3s", IDL: metadata.IDLSource{Type: "zip", ResolvedRevision: strings.Repeat("a", 64)}}
 	runtime, err := NewBuilder(cc).Build(context.Background(), a, &archiveidl.Revision{Digest: a.IDL.ResolvedRevision}, bundles, routes)
 	if err != nil {
 		t.Fatal(err)

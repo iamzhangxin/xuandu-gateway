@@ -1,6 +1,7 @@
 .idea/
 bin/
 *.log
+*.log.[0-9]*
 
 .local/
 .gateway-diagnose/

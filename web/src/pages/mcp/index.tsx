@@ -39,6 +39,7 @@ export default function McpPage() {
  const serverName = (id: string) => data?.servers.find(s => s.id === id)?.name || id;
  const status = (id: string) => { const s = data?.statuses.find(v => v.serverId === id); const names: Record<string, string> = { ready: '就绪', disabled: '已停用', unavailable: '不可用', listener_off: '监听未开启' }; return <Space direction="vertical" size={2}><Tag color={s?.status === 'ready' ? 'green' : s?.status === 'unavailable' ? 'red' : 'default'}>{names[s?.status || ''] || '加载中'}</Tag>{s?.error && <Typography.Text type="danger" style={{ fontSize: 12 }}>{s.error}</Typography.Text>}</Space>; };
  return <PageContainer title="MCP 服务" subTitle="管理服务入口、工具和调用方授权" breadcrumbRender={false} extra={<Space><Link to="/apps"><Button>应用</Button></Link><Link to="/docs"><Button>接口文档</Button></Link></Space>}>
+  <Alert type="info" title="MCP 入口仅接受所属应用的域名，需携带授权 Key，无需 X-App-Code。代理须保留 Host。" showIcon style={{ marginBottom: 16 }} />
   {error && <Alert type="error" title="加载失败" description={error} showIcon style={{ marginBottom: 16 }} />}
   {data?.listenerError && <Alert type="error" title={data.listenerError} showIcon style={{ marginBottom: 16 }} />}
   {data && !data.listenerEnabled && <Alert type="info" title="MCP 监听尚未开启" description="在启动配置中设置 mcp.enabled: true 后重启网关，默认监听 8081。" showIcon style={{ marginBottom: 16 }} />}
@@ -50,6 +51,7 @@ export default function McpPage() {
    <Tabs activeKey={tab} onChange={setTab} tabBarStyle={{ padding: '0 24px' }} items={[
     { key: 'servers', label: `MCP 服务 (${data?.servers.length || 0})`, children: <Table<McpServer> rowKey="id" loading={loading} dataSource={data?.servers.filter(s => match(`${s.name} ${s.app} ${s.endpoints.join(' ')}`))} scroll={{ x: 1000 }} columns={[
      { title: '服务名称', dataIndex: 'name', render: (v, row) => <Button type="link" onClick={() => open('server', row)}>{v}</Button> }, { title: '应用', dataIndex: 'app' },
+     { title: '应用域名', render: (_, row) => apps.find(a => a.name === row.app)?.domain || '待配置' },
      { title: '访问路径', dataIndex: 'endpoints', render: (v: string[]) => <Space direction="vertical">{v.map(url => <Typography.Text key={url} copyable className="path-cell">{url}</Typography.Text>)}</Space> },
      { title: '认证请求头', render: (_, s) => <span className="path-cell">{s.header}{s.bearer ? ' · Bearer' : ''}</span> }, { title: '工具数', render: (_, s) => data?.tools.filter(t => t.serverId === s.id).length }, { title: '状态', render: (_, s) => status(s.id) },
      { title: '操作', width: 220, render: (_, s) => <Space><Button type="link" size="small" onClick={() => inspect(s.id)}>工具定义</Button><Button type="link" size="small" onClick={() => editAccess(s)}>Key 授权</Button><Button type="text" danger icon={<DeleteOutlined />} aria-label={`删除服务 ${s.name}`} onClick={() => remove('server', s)} /></Space> },
@@ -69,7 +71,7 @@ export default function McpPage() {
     <Form.Item name="name" label={kind === 'tool' ? '工具名称' : kind === 'key' ? '调用方名称' : '服务名称'} rules={[{ required: true, message: '请输入名称' }, ...(kind === 'tool' ? [{ pattern: /^[A-Za-z][A-Za-z0-9_-]{0,63}$/, message: '以字母开头，使用字母、数字、横线或下划线，最多 64 位' }] : [])]}><Input placeholder={kind === 'tool' ? '例如 get_product' : kind === 'key' ? '例如商城助手' : '例如商品 MCP'} /></Form.Item>
     {(kind === 'server' || kind === 'tool') && <Form.Item name="app" label="应用" rules={[{ required: true, message: '选择应用' }]}><Select showSearch optionFilterProp="label" options={apps.map(a => ({ value: a.name, label: a.name }))} onChange={() => { if (kind === 'tool') form.setFieldsValue({ operationId: undefined, serverId: undefined }); }} /></Form.Item>}
     {kind === 'server' && <>
-     <Form.Item name="endpointText" label="MCP 访问路径" extra="每行一个路径，例如 /product/mcp。多个路径共享同一服务身份、工具和授权；不同服务不能使用相同路径。客户端用网关地址加此路径连接。" rules={[{ required: true, message: '请输入访问路径' }]}><Input.TextArea rows={3} placeholder="/product/mcp" /></Form.Item>
+     <Form.Item name="endpointText" label="MCP 访问路径" extra="每行一个路径，例如 /product/mcp。多个路径共享同一服务身份、工具和授权；不同服务不能使用相同路径。客户端使用所属应用域名加此路径连接，代理需保留 Host。" rules={[{ required: true, message: '请输入访问路径' }]}><Input.TextArea rows={3} placeholder="/product/mcp" /></Form.Item>
      <Space align="start"><Form.Item name="header" label="Key 请求头名称" rules={[{ required: true }]}><Input placeholder="X-MCP-Key" onChange={e => { if (e.target.value.toLowerCase() === 'authorization') form.setFieldValue('bearer', true); }} /></Form.Item><Form.Item name="bearer" label="使用 Bearer 前缀" valuePropName="checked"><Switch /></Form.Item></Space>
      <Form.Item name="enabled" label="启用 MCP 服务" valuePropName="checked"><Switch /></Form.Item>
     </>}

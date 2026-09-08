@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { saveApp, type Application, type FormValues } from '@/services/gateway';
 export function StateTag({ state }: { state: string }) {
  const styles: Record<string, [string, string]> = {
-  ready: ['success', '正常'], degraded: ['warning', '降级'], disabled: ['default', '已停用'],
+  unconfigured: ['warning', '待配置'], ready: ['success', '正常'], degraded: ['warning', '降级'], disabled: ['default', '已停用'],
  };
  const [color, label] = styles[state] || ['processing', '待加载'];
  return <Tag color={color} className="state-tag"><span className="state-dot" />{label}</Tag>;
@@ -18,24 +18,27 @@ export function ContractModal({ open, editing, onClose, onSaved }: {
  const [busy, setBusy] = useState(false);
  const { message } = App.useApp();
  useEffect(() => { if (open) { form.resetFields(); form.setFieldsValue({
-  name: editing?.name || '', serviceName: editing?.serviceName || '', rpcTimeout: editing?.rpcTimeout || '3s', url: '',
+  name: editing?.name || '', domain: editing?.domain || '', serviceName: editing?.serviceName || '', rpcTimeout: editing?.rpcTimeout || '3s', url: '',
  }); } }, [open, editing, form]);
  const submit = async () => {
   let values: FormValues;
   try { values = await form.validateFields(); } catch { return; }
   setBusy(true);
   try { const result = await saveApp(values, editing);
-   message.success(editing ? ('changed' in result && !result.changed ? '契约没有变化' : '契约已更新') : '应用已创建');
+   message.success(editing ? ('changed' in result && !result.changed ? '应用没有变化' : '应用已更新') : '应用已创建');
    onSaved(); onClose();
   } catch (error) { message.error((error as Error).message); } finally { setBusy(false); }
  };
- return <Modal title={editing ? `更新契约 · ${editing.name}` : '新增应用'} open={open}
+ return <Modal title={editing ? `更新应用 · ${editing.name}` : '新增应用'} open={open}
   onCancel={onClose} onOk={submit} confirmLoading={busy} maskClosable={!busy}
   cancelButtonProps={{ disabled: busy }} okText={editing ? '校验并更新' : '创建应用'} cancelText="取消" width={560}>
   <p className="modal-intro">上传包含多个 IDL 的 ZIP 下载链接，校验通过后发布路由。</p>
   <Form form={form} layout="vertical" requiredMark={false}>
-   <Form.Item name="name" label="应用名称" rules={[{ required: true, message: '请输入应用名称' }, { pattern: /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/, message: '使用字母、数字、横线或下划线' }]}>
+   <Form.Item name="name" label="应用编码" extra="调用 HTTP 接口时，X-App-Code 请求头必须与此编码一致。" rules={[{ required: true, message: '请输入应用名称' }, { pattern: /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/, message: '使用字母、数字、横线或下划线' }]}>
     <Input disabled={!!editing} placeholder="例如 product-service" />
+   </Form.Item>
+   <Form.Item name="domain" label="应用域名" extra="填写域名或 IP，不包含协议、端口或路径；每个域名只能绑定一个应用。" rules={[{ required: true, whitespace: true, message: '请输入应用域名' }]}>
+    <Input placeholder="例如 product.example.com" />
    </Form.Item>
    <div className="form-row"><Form.Item name="serviceName" label="Consul 服务" rules={[{ required: true, message: '请输入服务名称' }]}>
     <Input placeholder="例如 product-service" />

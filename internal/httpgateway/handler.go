@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	common "github.com/iamzhangxin/rpcxcommon/errors"
+	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	"log/slog"
 	"net/http"
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -51,7 +53,7 @@ func (h *Handler) Serve(ctx context.Context, c *app.RequestContext) {
 		} else if status >= 400 {
 			level = slog.LevelWarn
 		}
-		attrs := []any{"request_id", requestID, "method", string(c.Method()), "path", string(c.Path()),
+		attrs := []any{"request_id", requestID, "method", string(c.Method()), "host", string(c.Request.Header.Host()), "path", string(c.Path()),
 			"route", routePath, "query_keys", queryKeys, "body_bytes", len(c.Request.Body()),
 			"app", appName, "service", service, "rpc_service", rpcService, "rpc_method", rpcMethod, "idl_file", idlFile,
 			"revision", revision, "duration_ms", float64(time.Since(start)) / float64(time.Millisecond),
@@ -76,7 +78,25 @@ func (h *Handler) Serve(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	defer lease.Release()
-	target, ok := lease.Snapshot.Routes.Match(string(c.Method()), string(c.Path()))
+	domain, err := metadata.RequestDomain(string(c.Request.Header.Host()))
+	appName = lease.Snapshot.Domains[domain]
+	if err != nil || appName == "" {
+		source, reason = "gateway_validation", "unknown_domain"
+		fail(apperr.FromCommon(404, common.ErrNotFound))
+		return
+	}
+	codes := []string{}
+	c.Request.Header.VisitAll(func(k, v []byte) {
+		if strings.EqualFold(string(k), "X-App-Code") {
+			codes = append(codes, string(v))
+		}
+	})
+	if len(codes) != 1 || codes[0] != appName {
+		source, reason = "gateway_validation", "app_code_mismatch"
+		fail(apperr.FromCommon(403, common.ErrPermissionDenied))
+		return
+	}
+	target, ok := lease.Snapshot.Match(appName, string(c.Method()), string(c.Path()))
 	if !ok {
 		source, reason = "gateway", "route_not_found"
 		fail(apperr.FromCommon(404, common.ErrNotFound))
