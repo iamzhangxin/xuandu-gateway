@@ -1,0 +1,18 @@
+server:
+  address: "0.0.0.0:8080"
+  readTimeout: "5s"
+  writeTimeout: "10s"
+  idleTimeout: "60s"
+  maxRequestBodyBytes: 4194304
+consul:
+  address: "" # Set CONSUL_HTTP_ADDR before starting.
+  scheme: "http"
+  tokenEnv: "CONSUL_HTTP_TOKEN"
+  metadataPrefix: "xuandu/apps"
+admin:
+  enabled: true
+  address: "127.0.0.1:9090"
+
+mcp:
+  enabled: true
+  address: "0.0.0.0:8081"

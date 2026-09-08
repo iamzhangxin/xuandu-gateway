@@ -1,0 +1,118 @@
+# Before applying: set the image and CONSUL_HTTP_ADDR. Consul is managed separately.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: xuandu-gateway
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: xuandu-config
+  namespace: xuandu-gateway
+data:
+  gateway.yaml: |
+    server:
+      address: "0.0.0.0:8080"
+      readTimeout: "5s"
+      writeTimeout: "10s"
+      idleTimeout: "60s"
+      maxRequestBodyBytes: 4194304
+    consul:
+      address: ""
+      scheme: "http"
+      tokenEnv: "CONSUL_HTTP_TOKEN"
+      metadataPrefix: "xuandu/apps"
+    admin:
+      enabled: true
+      address: "0.0.0.0:9090"
+    mcp:
+      enabled: true
+      address: "0.0.0.0:8081"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xuandu
+  namespace: xuandu-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: xuandu}
+  template:
+    metadata:
+      labels: {app: xuandu}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: xuandu
+          image: xuandu:v0.0.1 # Replace with your published image address.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: api, containerPort: 8080}
+            - {name: mcp, containerPort: 8081}
+            - {name: console, containerPort: 9090}
+          env:
+            - name: CONSUL_HTTP_ADDR
+              value: "" # Required: host:port or https://host:port.
+            - name: CONSUL_HTTP_TOKEN
+              value: "" # Optional with ACL disabled; use secretKeyRef for credentials.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          startupProbe:
+            httpGet: {path: /healthz, port: api}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /readyz, port: api}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: api}
+            periodSeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/xuandu, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: xuandu-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xuandu-api
+  namespace: xuandu-gateway
+spec:
+  type: ClusterIP
+  selector: {app: xuandu}
+  ports:
+    - {name: api, port: 8080, targetPort: api}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xuandu-mcp
+  namespace: xuandu-gateway
+spec:
+  type: ClusterIP
+  selector: {app: xuandu}
+  ports:
+    - {name: mcp, port: 8081, targetPort: mcp}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: xuandu-console
+  namespace: xuandu-gateway
+spec:
+  type: ClusterIP
+  selector: {app: xuandu}
+  ports:
+    - {name: console, port: 9090, targetPort: console}

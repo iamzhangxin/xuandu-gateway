@@ -1,0 +1,23 @@
+# Example only. DNS/TLS and the namespace follow your existing Traefik setup.
+# Enable mcp.enabled in the gateway before using this route. Preserve the path; the gateway does not bind MCP services to domains.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: xuandu-mcp
+  namespace: xuandu-gateway
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Path(`/product/mcp`)
+      kind: Rule
+      services:
+        - name: xuandu-mcp
+          port: 8081
+          passHostHeader: true
+    - match: Path(`/test/mcp`)
+      kind: Rule
+      services:
+        - name: xuandu-mcp
+          port: 8081
+          passHostHeader: true
+  tls: {}

@@ -1,0 +1,198 @@
+name: xuandu-pipeline
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize releases so architecture tags and latest cannot race between runs.
+concurrency:
+  group: xuandu-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  build:
+    name: Verify and build binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      latest: ${{ steps.version.outputs.latest }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate registry configuration and resolve version
+        id: version
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+          IMAGE: ${{ secrets.IMAGE }}
+        run: |
+          set -euo pipefail
+          : "${REGISTRY:?Configure the REGISTRY Actions secret}"
+          : "${IMAGE:?Configure the IMAGE Actions secret}"
+          if [[ "$REGISTRY" == *'/'* || "$IMAGE" != "$REGISTRY/"* ]]; then
+            echo 'REGISTRY must be a registry host; IMAGE must start with REGISTRY/.' >&2
+            exit 1
+          fi
+          version="sha-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          latest=false
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+            if [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              latest=true
+            fi
+          fi
+          # Reserve six characters for the architecture suffix.
+          if [[ ! "$version" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,121}$ ]]; then
+            echo 'The Git tag is not a valid Docker image tag.' >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and check frontend
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npm run tsc
+      - name: Verify Wire, Go code, and tests
+        run: |
+          go mod download
+          go generate ./internal/app
+          git diff --exit-code -- go.mod go.sum internal/app/wire_gen.go
+          go vet ./internal/... ./cmd/... ./benchmark/...
+          go test ./internal/... ./cmd/... ./benchmark/...
+      - name: Build embedded Linux binaries
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -trimpath -ldflags='-s -w' -o "dist-$arch/xuandu" ./cmd
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-amd64
+          path: dist-amd64/xuandu
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-arm64
+          path: dist-arm64/xuandu
+          if-no-files-found: error
+          retention-days: 1
+
+  image:
+    name: Image (${{ matrix.goarch }})
+    needs: build
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            goarch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            goarch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      ARCH_IMAGE: ${{ secrets.IMAGE }}:${{ needs.build.outputs.version }}-${{ matrix.goarch }}
+      EXPECTED_ARCH: ${{ matrix.goarch }}
+      DOCKER_BUILD_SUMMARY: 'false'
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: binary-${{ matrix.goarch }}
+          path: dist
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ secrets.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ secrets.IMAGE }}
+      - name: Package prebuilt binary
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ci
+          platforms: ${{ matrix.platform }}
+          tags: ${{ env.ARCH_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=xuandu-${{ matrix.goarch }}
+          cache-to: type=gha,mode=max,scope=xuandu-${{ matrix.goarch }}
+      - name: Verify architecture and executable
+        run: |
+          actual="$(docker image inspect "$ARCH_IMAGE" --format '{{ .Os }}/{{ .Architecture }}')"
+          test "$actual" = "linux/$EXPECTED_ARCH"
+          docker run --rm "$ARCH_IMAGE" -h
+      # Ordinary Docker push avoids the Artifactory BuildKit registry-export issue.
+      - name: Push architecture image
+        run: |
+          for attempt in 1 2 3; do
+            if docker push "$ARCH_IMAGE"; then
+              exit 0
+            fi
+            if [[ "$attempt" -lt 3 ]]; then sleep 10; fi
+          done
+          echo 'docker push failed after 3 attempts' >&2
+          exit 1
+
+  merge:
+    name: Publish multi-architecture manifest
+    needs: [build, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      IMAGE: ${{ secrets.IMAGE }}
+      VERSION: ${{ needs.build.outputs.version }}
+      PUBLISH_LATEST: ${{ needs.build.outputs.latest }}
+    steps:
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ secrets.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Publish and inspect manifests
+        run: |
+          publish_manifest() {
+            local target="$IMAGE:$1"
+            docker manifest create "$target" "$IMAGE:$VERSION-amd64" "$IMAGE:$VERSION-arm64"
+            docker manifest annotate "$target" "$IMAGE:$VERSION-amd64" --os linux --arch amd64
+            docker manifest annotate "$target" "$IMAGE:$VERSION-arm64" --os linux --arch arm64
+            docker manifest push "$target"
+            docker manifest inspect "$target" > /dev/null
+          }
+          publish_manifest "$VERSION"
+          if [[ "$PUBLISH_LATEST" == true ]]; then
+            publish_manifest latest
+          fi
+          echo "Published version: \`$VERSION\` (linux/amd64, linux/arm64)" >> "$GITHUB_STEP_SUMMARY"

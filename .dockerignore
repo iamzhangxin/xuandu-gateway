@@ -1,0 +1,12 @@
+.git
+.idea
+bin
+.agents
+.codex
+
+web/node_modules
+web/src/.umi*
+web/.turbopack
+
+.local/
+.gateway-diagnose/
