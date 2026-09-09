@@ -7,7 +7,7 @@ import { api, listApps, type Application } from '@/services/gateway';
 type Schema = { example?: unknown; pattern?: string; $ref?: string; title?: string; type?: string; format?: string; description?: string; properties?: Record<string, Schema>; required?: string[]; items?: Schema; additionalProperties?: Schema; enum?: unknown[]; allOf?: Schema[]; nullable?: boolean };
 type Parameter = { name: string; in: string; required: boolean; description?: string; schema: Schema };
 type Content = { content?: Record<string, { schema: Schema }>; description?: string };
-type Operation = { tags?: string[]; operationId: string; summary: string; description?: string; parameters?: Parameter[]; requestBody?: Content; responses: Record<string, Content>; 'x-idl-file': string; 'x-rpc-method': string };
+type Operation = { 'x-xuandu-auth'?: string; tags?: string[]; operationId: string; summary: string; description?: string; parameters?: Parameter[]; requestBody?: Content; responses: Record<string, Content>; 'x-idl-file': string; 'x-rpc-method': string };
 type Document = { info: { title: string; version: string; description?: string }; paths: Record<string, Record<string, Operation>>; components: { schemas: Record<string, Schema> } };
 function resolve(schema: Schema, doc: Document, seen = new Set<string>()): Schema {
  if (schema.$ref) {
@@ -80,9 +80,9 @@ export default function APIDocs() {
    {(error || catalogError) && <Alert type="error" title="文档加载失败" description={error || catalogError} showIcon />}
    {loading && <Spin />}{!loading && !entry && !error && <Empty description={query ? '没有匹配的接口' : '选择应用查看接口文档'} />}
    {doc && entry && <>
-    <div className="docs-operation-header"><Typography.Text type="secondary">{name} / {(entry.op.tags?.[0] || '未分组')}</Typography.Text><Typography.Title level={3}>{entry.op.summary || entry.op['x-rpc-method']}</Typography.Title><Space wrap><Tag color={colors[entry.method]}>{entry.method.toUpperCase()}</Tag><Typography.Text code copyable>{entry.path}</Typography.Text></Space><div className="docs-metadata">RPC：{entry.op.tags?.[0]}.{entry.op['x-rpc-method']}<br />IDL：{entry.op['x-idl-file']}<br />版本：{doc.info.version}</div></div>
+    <div className="docs-operation-header"><Typography.Text type="secondary">{name} / {(entry.op.tags?.[0] || '未分组')}</Typography.Text><Typography.Title level={3}>{entry.op.summary || entry.op['x-rpc-method']}</Typography.Title><Space wrap><Tag color={entry.op['x-xuandu-auth'] === 'required' ? 'orange' : 'default'}>{entry.op['x-xuandu-auth'] === 'required' ? '需要登录' : '允许匿名'}</Tag><Tag color={colors[entry.method]}>{entry.method.toUpperCase()}</Tag><Typography.Text code copyable>{entry.path}</Typography.Text></Space><div className="docs-metadata">RPC：{entry.op.tags?.[0]}.{entry.op['x-rpc-method']}<br />IDL：{entry.op['x-idl-file']}<br />版本：{doc.info.version}</div></div>
     <section className="docs-section"><h3>接口说明</h3><Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{entry.op.description || 'IDL 未提供接口注释'}</Typography.Paragraph></section>
-    <section className="docs-section"><h3>请求参数</h3><Typography.Paragraph type="secondary">必填标记来自 IDL；实际业务校验由下游服务负责。</Typography.Paragraph>
+    <section className="docs-section"><h3>请求参数</h3><Typography.Paragraph type="secondary">登录要求与应用身份由网关校验；其余字段标记来自 IDL，业务校验由下游负责。</Typography.Paragraph>
      {['path', 'query', 'header', 'cookie'].filter(location => entry.op.parameters?.some(p => p.in === location)).map(location => <div key={location}><h4>{location.toUpperCase()}</h4><Table<Parameter> size="small" pagination={false} rowKey="name" scroll={{ x: 560 }} dataSource={entry.op.parameters?.filter(p => p.in === location)} columns={[{ title: '字段名', dataIndex: 'name' }, { title: '必填', render: (_, p) => p.required ? '是' : '否' }, { title: '类型', render: (_, p) => typeName(p.schema, doc) }, { title: '说明', dataIndex: 'description' }]} /></div>)}
      {entry.op.requestBody?.content?.['application/json'] && <><h4>Body · application/json</h4><Model schema={entry.op.requestBody.content['application/json'].schema} doc={doc} /></>}
     </section>

@@ -84,6 +84,7 @@ type fakeRPC struct {
 	spu   string
 	user  string
 	body  string
+	info  rpcmeta.RequestInfo
 	err   error
 }
 
@@ -94,6 +95,7 @@ func (f *fakeRPC) GenericCall(ctx context.Context, _ string, arg any, _ ...callo
 	req := arg.(*generic.HTTPRequest)
 	f.spu = req.Request.URL.Query().Get("spuId")
 	f.user = rpcmeta.UserId(ctx)
+	f.info = rpcmeta.FromContext(ctx)
 	f.body = string(req.RawBody)
 	if f.err != nil {
 		return nil, f.err
@@ -110,7 +112,6 @@ type keyTransport struct {
 func (k keyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("X-MCP-Key", k.key)
-	r.Header.Set("X-User-ID", "forged-user")
 	return k.base.RoundTrip(r)
 }
 func setup(t *testing.T) (*Service, *httptest.Server, *fakeRPC, *memoryRepo) {
@@ -198,7 +199,7 @@ func TestSDKDiscoveryCallAndAuthorization(t *testing.T) {
 		t.Fatal(e)
 	}
 	rpc.mu.Lock()
-	rpc.err = kerrors.NewBizStatusError(400001, "invalid argument")
+	rpc.err = kerrors.NewBizStatusError(400001, "参数无效")
 	rpc.mu.Unlock()
 	result, e = cs.CallTool(ctx, &sdk.CallToolParams{Name: "get_product", Arguments: map[string]any{}})
 	if e != nil || !result.IsError || result.StructuredContent != nil || !strings.Contains(result.Content[0].(*sdk.TextContent).Text, "400001") {
@@ -587,5 +588,50 @@ func TestMCPDomainWithoutAppCode(t *testing.T) {
 	s.ServeHTTP(response, request)
 	if response.Code != 403 {
 		t.Fatalf("old domain still accepted: %d", response.Code)
+	}
+}
+
+func TestMCPLoginRequirementWithEmptyUser(t *testing.T) {
+	s, server, _, _ := setup(t)
+	old := s.manager.Load().Runtimes["product"]
+	routes := append([]idl.Route(nil), old.Routes...)
+	for i := range routes {
+		if routes[i].Path == "/product/get" {
+			routes[i].RequireLogin = true
+		}
+	}
+	rpc := &fakeRPC{}
+	if err := s.manager.ReplaceApp("product", &rt.ServiceRuntime{Config: old.Config, AppName: old.AppName, Revision: old.Revision, Routes: routes, Client: rpc, Timeout: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	client := connect(t, server.URL+"/product/mcp", "test-key")
+	result, err := client.CallTool(context.Background(), &sdk.CallToolParams{Name: "get_product", Arguments: map[string]any{"spuId": "42"}})
+	if err != nil || !result.IsError {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if !strings.Contains(result.Content[0].(*sdk.TextContent).Text, `"code":"401003"`) || rpc.calls != 0 {
+		t.Fatal("login bypassed or wrong error")
+	}
+}
+
+func TestMCPHeaderPassthrough(t *testing.T) {
+	s, server, rpc, _ := setup(t)
+	request := httptest.NewRequest("POST", server.URL+"/product/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_product","arguments":{"spuId":"42"}}}`))
+	request.Header.Set("X-MCP-Key", "test-key")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("X-User-ID", "user-from-entry")
+	request.Header.Set("X-App-Code", "passed-without-validation")
+	request.Header.Set("X-Device-Type", "any-device-type")
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, request)
+	if response.Code != 200 || rpc.calls != 1 {
+		t.Fatalf("call failed: %d %s", response.Code, response.Body.String())
+	}
+	if rpc.info != (rpcmeta.RequestInfo{UserId: "user-from-entry", AppCode: "passed-without-validation", DeviceType: "any-device-type"}) {
+		t.Fatalf("headers not passed through: %+v", rpc.info)
 	}
 }

@@ -37,7 +37,7 @@ export function ContractModal({ open, editing, onClose, onSaved }: {
    <Form.Item name="name" label="应用编码" extra="调用 HTTP 接口时，X-App-Code 请求头必须与此编码一致。" rules={[{ required: true, message: '请输入应用名称' }, { pattern: /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/, message: '使用字母、数字、横线或下划线' }]}>
     <Input disabled={!!editing} placeholder="例如 product-service" />
    </Form.Item>
-   <Form.Item name="domain" label="应用域名" extra="填写域名或 IP，不包含协议、端口或路径；每个域名只能绑定一个应用。" rules={[{ required: true, whitespace: true, message: '请输入应用域名' }]}>
+   <Form.Item name="domain" label="应用域名" extra="填写域名或 IP，不包含协议、端口或路径；多个应用可以共用域名，由 X-App-Code 区分。" rules={[{ required: true, whitespace: true, message: '请输入应用域名' }]}>
     <Input placeholder="例如 product.example.com" />
    </Form.Item>
    <div className="form-row"><Form.Item name="serviceName" label="Consul 服务" rules={[{ required: true, message: '请输入服务名称' }]}>

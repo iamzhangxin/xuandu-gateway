@@ -106,7 +106,7 @@ curl --fail-with-body http://127.0.0.1:9090/admin/apps \
 
 `serviceName` 必须与 Consul 中已注册、可访问的后端服务匹配。后端须支持 Kitex Thrift 与 TTHeader 元信息；网关不会启动后端服务。
 
-应用通过域名隔离，先按 HTTP `Host` 选择应用，再在该应用内匹配方法和路径。不同应用允许相同路径，同一域名只能绑定一个应用（停用后仍保留绑定）。`X-App-Code` 必须唯一且与应用 `name` 完全一致；缺失、不匹配或重复时返回 HTTP 403，未知域名返回 HTTP 404。
+应用通过 HTTP `Host` + `X-App-Code` 联合定位，再在该应用内匹配方法和路径。多个应用可以共用同一域名，也可以声明相同路径；请求只在选定应用中查找，不回退到其他应用。`X-App-Code` 必须唯一且与应用 `name` 完全一致；缺失、不匹配或重复时返回 HTTP 403，未知域名返回 HTTP 404。
 
 本地无需修改 DNS，可这样调用：
 
@@ -158,7 +158,20 @@ GET /admin/apps/{name}/openapi.json
 
 失败时 `code` 为非 `000000` 的六位编码，`data` 为 `null`。下游业务错误保留合法业务码和描述；HTTP 状态仍反映参数错误、服务不可用、超时等情况。管理 API 和健康探针使用各自的响应协议。
 
-HTTP 入口仅透传 `X-User-ID` 到 RPC 上下文。它不是身份认证机制，身份校验应由可信的前置服务完成。
+HTTP 和 MCP 入口将 `X-User-ID`、`X-App-Code`、`X-Device-ID`、`X-Device-Type`、`X-Device-Name` 原样写入 `rpcmeta.RequestInfo` 并通过 TTHeader 透传。不校验字段内容，不去除空白，缺失或空值以空字符串写入。下游用 `rpcmeta.FromContext(ctx)` 读取完整信息，也可继续使用 `rpcmeta.UserId(ctx)` 等单字段方法。HTTP 的应用定位仍使用 Host + X-App-Code，MCP 保留域名及独立 Key 授权，不用 X-App-Code 校验身份。
+
+需要登录的接口在 Thrift 方法上声明：
+
+```thrift
+GetRes Get(1: GetReq req) (
+    api.get = "/api/product/get",
+    xuandu.Auth = "required"
+)
+```
+
+`xuandu.Auth = "required"` 时，UserId 为空就直接返回公共错误 `ErrIdentityRequired`：HTTP 401，`{"code":"401003","message":"用户身份不能为空","data":null}`，不调用下游。未声明或声明 `"optional"` 时不拦截空身份。登录规则随 ZIP 契约保存、更新和恢复，并展示在路由及接口文档中。注解只支持 required / optional；同一方法不能重复声明。
+
+公共错误提示统一为中文。Token 校验由可信前置网关完成，并覆盖客户端传入的身份头；玄渡只负责声明了登录要求的接口的空用户身份检查。MCP 工具调用也遵循同一登录规则，失败时设置 `isError=true`。
 
 ## 日志
 
@@ -187,7 +200,7 @@ kubectl -n xuandu-gateway exec deployment/xuandu -- tail -n 100 /app/logs/xuandu
 
 MCP 服务按路径匹配，并强制校验请求 Host 属于其关联应用；不校验 `X-App-Code`，但原有 Key 和工具授权仍然生效。域名不同的请求返回 HTTP 403，即使持有有效 Key 也无法调用。配置只接受路径，不接受完整 URL，域名在应用中维护。一个服务可配置多个路径，不同服务不能占用相同路径。认证 Header 可自定义，也支持 `Authorization: Bearer <key>`。
 
-Key 原文只在创建或轮换时显示，Consul 保存其摘要。授权同步间隔为 5 秒；无法刷新有效权限超过 60 秒后拒绝新 MCP 请求。MCP 身份与 HTTP 用户身份独立，不把 MCP Key 或调用方自带的 `X-User-ID` 透传给后端。
+Key 原文只在创建或轮换时显示，Consul 保存其摘要。授权同步间隔为 5 秒；无法刷新有效权限超过 60 秒后拒绝新 MCP 请求。MCP Key 只用于服务和工具授权，不透传给后端，也不充当用户身份。五个约定请求头来自调用请求，原样透传；不从工具 JSON 参数中构造身份。
 
 本地 MCP 联调可将应用域名暂设为 `127.0.0.1`，然后访问 `http://127.0.0.1:8081/product/mcp`；也可以通过本地 DNS/hosts 或客户端 Host 设置使用已配置域名。
 

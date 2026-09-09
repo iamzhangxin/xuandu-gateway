@@ -160,9 +160,6 @@ func (s *Service) CreateApp(ctx context.Context, req CreateAppRequest) (a *metad
 	} else if !errors.Is(err, metadata.ErrNotFound) {
 		return nil, err
 	}
-	if err = s.checkDomain(ctx, a); err != nil {
-		return nil, err
-	}
 	candidate, err := s.build(ctx, a, "")
 	if err != nil {
 		return nil, err
@@ -238,9 +235,6 @@ func (s *Service) UpdateAppWithRequest(ctx context.Context, name string, req Upd
 		return nil, err
 	}
 	if err = a.Validate(); err != nil {
-		return nil, err
-	}
-	if err = s.checkDomain(ctx, a); err != nil {
 		return nil, err
 	}
 	a.IDL.URL = ""
@@ -465,21 +459,6 @@ func (s *Service) refresh(ctx context.Context, replacing string) (uint64, error)
 		}
 	}
 	return epoch, nil
-}
-
-// The catalog CAS in Create/Update guards this read against concurrent replicas.
-func (s *Service) checkDomain(ctx context.Context, candidate *metadata.App) error {
-	apps, err := s.Store.List(ctx)
-	if err != nil {
-		return err
-	}
-	for _, a := range apps {
-		domain, _ := metadata.NormalizeDomain(a.Domain)
-		if a.Name != candidate.Name && domain == candidate.Domain {
-			return metadata.ErrDomainConflict
-		}
-	}
-	return nil
 }
 
 func (s *Service) operationContext(ctx context.Context) (context.Context, context.CancelFunc) {

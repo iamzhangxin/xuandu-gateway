@@ -9,11 +9,12 @@ import (
 )
 
 type Route struct {
-	IDLPath    string `json:"idlPath"`
-	HTTPMethod string `json:"httpMethod"`
-	Path       string `json:"path"`
-	RPCService string `json:"rpcService"`
-	RPCMethod  string `json:"rpcMethod"`
+	RequireLogin bool   `json:"requireLogin"`
+	IDLPath      string `json:"idlPath"`
+	HTTPMethod   string `json:"httpMethod"`
+	Path         string `json:"path"`
+	RPCService   string `json:"rpcService"`
+	RPCMethod    string `json:"rpcMethod"`
 }
 
 func ExtractRoutes(b *Bundle) ([]Route, error) {
@@ -32,6 +33,16 @@ func ExtractRoutes(b *Bundle) ([]Route, error) {
 	seen := map[string]bool{}
 	for _, fn := range svc.Functions {
 		count := 0
+		requireLogin, authSeen := false, false
+		for _, a := range fn.Annotations {
+			if a.Key != "xuandu.Auth" {
+				continue
+			}
+			if authSeen || len(a.Values) != 1 || (a.Values[0] != "required" && a.Values[0] != "optional") {
+				return nil, fmt.Errorf("xuandu.Auth must be required or optional, declared once")
+			}
+			authSeen, requireLogin = true, a.Values[0] == "required"
+		}
 		for _, a := range fn.Annotations {
 			method := ""
 			switch a.Key {
@@ -67,7 +78,7 @@ func ExtractRoutes(b *Bundle) ([]Route, error) {
 				return nil, fmt.Errorf("duplicate HTTP route")
 			}
 			seen[key] = true
-			routes = append(routes, Route{HTTPMethod: method, Path: p, RPCService: svc.Name, RPCMethod: fn.Name, IDLPath: b.MainPath})
+			routes = append(routes, Route{RequireLogin: requireLogin, HTTPMethod: method, Path: p, RPCService: svc.Name, RPCMethod: fn.Name, IDLPath: b.MainPath})
 		}
 		if count > 1 {
 			return nil, fmt.Errorf("one HTTP annotation per RPC method required")

@@ -90,3 +90,26 @@ func TestGetBodyWarning(t *testing.T) {
 		t.Fatal(op)
 	}
 }
+
+func TestLoginMetadata(t *testing.T) {
+	doc, err := Generate("p", "revision", map[string]string{"idl/main.thrift": `struct Q {1:string user(api.header="X-User-ID")} service S {Q Get(1:Q req)(api.get="/p",xuandu.Auth="required")}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := doc["paths"].(Object)["/p"].(Object)["get"].(Object)
+	if op["x-xuandu-auth"] != "required" || op["responses"].(Object)["401"] == nil {
+		t.Fatal("missing login policy")
+	}
+	found := false
+	for _, p := range op["parameters"].([]Object) {
+		if p["name"] == "X-User-ID" {
+			found = true
+			if p["required"] != true {
+				t.Fatal("identity not required")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing identity header")
+	}
+}

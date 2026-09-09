@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	common "github.com/iamzhangxin/rpcxcommon/errors"
+	"github.com/iamzhangxin/rpcxcommon/rpcmeta"
 	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
 	"log/slog"
 	"net/http"
@@ -79,8 +80,7 @@ func (h *Handler) Serve(ctx context.Context, c *app.RequestContext) {
 	}
 	defer lease.Release()
 	domain, err := metadata.RequestDomain(string(c.Request.Header.Host()))
-	appName = lease.Snapshot.Domains[domain]
-	if err != nil || appName == "" {
+	if err != nil || len(lease.Snapshot.Domains[domain]) == 0 {
 		source, reason = "gateway_validation", "unknown_domain"
 		fail(apperr.FromCommon(404, common.ErrNotFound))
 		return
@@ -91,11 +91,12 @@ func (h *Handler) Serve(ctx context.Context, c *app.RequestContext) {
 			codes = append(codes, string(v))
 		}
 	})
-	if len(codes) != 1 || codes[0] != appName {
+	if len(codes) != 1 || !lease.Snapshot.HasApp(domain, codes[0]) {
 		source, reason = "gateway_validation", "app_code_mismatch"
 		fail(apperr.FromCommon(403, common.ErrPermissionDenied))
 		return
 	}
+	appName = codes[0]
 	target, ok := lease.Snapshot.Match(appName, string(c.Method()), string(c.Path()))
 	if !ok {
 		source, reason = "gateway", "route_not_found"
@@ -119,7 +120,7 @@ func (h *Handler) Serve(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	source, reason = "gateway_validation", "invalid_http_request"
-	// Only the explicitly supported identity header enters persistent RPC metadata.
+	// 仅将约定的五个请求头写入持久 Rpc 请求上下文。
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 	request, e := http.NewRequestWithContext(ctx, string(c.Method()), string(c.Request.URI().FullURI()), bytes.NewReader(body))
@@ -128,7 +129,7 @@ func (h *Handler) Serve(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	c.Request.Header.VisitAll(func(k, v []byte) { request.Header.Add(string(k), string(v)) })
-	result := executor.Execute(ctx, r, request, string(c.Request.Header.Peek("X-User-ID")))
+	result := executor.Execute(ctx, r, target.Route, request, rpcmeta.FromHTTPHeader(request.Header))
 	code, message, source, reason, rpcErrorType = result.Code, result.Message, result.Source, result.Reason, result.ErrorType
 	for k, values := range result.Header {
 		for _, v := range values {

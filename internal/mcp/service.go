@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/iamzhangxin/rpcxcommon/rpcmeta"
 	"github.com/iamzhangxin/xuandu-gateway/internal/config"
 	"github.com/iamzhangxin/xuandu-gateway/internal/executor"
 	"github.com/iamzhangxin/xuandu-gateway/internal/metadata"
@@ -447,6 +448,7 @@ func hexSecret() string { return fmt.Sprintf("%x", randomBytes(32)) }
 
 type scopeKey struct{}
 type requestScope struct {
+	Info            rpcmeta.RequestInfo
 	Snapshot        *rt.Snapshot
 	Runtime         *rt.ServiceRuntime
 	KeyId, ServerId string
@@ -481,7 +483,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	domain, err := metadata.RequestDomain(r.Host)
-	if err != nil || lease.Snapshot.Domains[domain] != cs.Config.App {
+	if err != nil || !lease.Snapshot.HasApp(domain, cs.Config.App) {
 		slog.Warn("mcp request rejected", "server_id", id, "app", cs.Config.App, "error_reason", "domain_mismatch", "host", r.Host, "status", 403)
 		http.Error(w, "MCP domain forbidden", http.StatusForbidden)
 		return
@@ -533,7 +535,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	scope := &requestScope{Runtime: runtime, KeyId: keyId, ServerId: id, Context: ctx, Snapshot: lease.Snapshot}
+	scope := &requestScope{Info: rpcmeta.FromHTTPHeader(r.Header), Runtime: runtime, KeyId: keyId, ServerId: id, Context: ctx, Snapshot: lease.Snapshot}
 	ctx = context.WithValue(ctx, scopeKey{}, scope)
 	r = r.WithContext(ctx)
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
@@ -571,7 +573,7 @@ func (s *Service) call(ctx context.Context, b *Binding, raw json.RawMessage) *sd
 	if !ok || target.AppName != scope.Runtime.AppName || target.Route != b.Route {
 		return failure("400001", "参数未匹配所选接口")
 	}
-	result := executor.Execute(scope.Context, scope.Runtime, req, "")
+	result := executor.Execute(scope.Context, scope.Runtime, b.Route, req, scope.Info)
 
 	if result.Code != "000000" {
 		return failure(result.Code, result.Message)

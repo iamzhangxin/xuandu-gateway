@@ -10,6 +10,7 @@ import (
 	common "github.com/iamzhangxin/rpcxcommon/errors"
 	"github.com/iamzhangxin/rpcxcommon/rpcmeta"
 	"github.com/iamzhangxin/xuandu-gateway/internal/apperr"
+	"github.com/iamzhangxin/xuandu-gateway/internal/idl"
 	rt "github.com/iamzhangxin/xuandu-gateway/internal/runtime"
 	"net/http"
 	"strings"
@@ -28,7 +29,7 @@ type Result struct {
 }
 
 // Execute only uses a caller-pinned runtime. It never performs HTTP loopback or discovery outside Kitex.
-func Execute(ctx context.Context, r *rt.ServiceRuntime, request *http.Request, userId string) (result Result) {
+func Execute(ctx context.Context, r *rt.ServiceRuntime, route idl.Route, request *http.Request, info rpcmeta.RequestInfo) (result Result) {
 	result.Header = make(http.Header)
 	code, message, source, reason, rpcErrorType := "000000", "success", "gateway_validation", "invalid_http_request", ""
 	defer func() {
@@ -39,7 +40,12 @@ func Execute(ctx context.Context, r *rt.ServiceRuntime, request *http.Request, u
 		result.Status = status
 		result.Payload, _ = json.Marshal(Response{Code: code, Message: message})
 	}
-	ctx = rpcmeta.WithUserId(ctx, userId)
+	ctx = rpcmeta.WithRequestInfo(ctx, info)
+	if route.RequireLogin && rpcmeta.UserId(ctx) == "" {
+		source, reason = "gateway_validation", "identity_required"
+		fail(apperr.FromCommon(401, common.ErrIdentityRequired))
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 	req, e := generic.FromHTTPRequest(request.WithContext(ctx))

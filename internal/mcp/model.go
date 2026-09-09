@@ -158,7 +158,7 @@ func endpointKey(raw string) (string, error) {
 
 func sensitiveHeader(h string) bool {
 	h = strings.ToLower(h)
-	return h == "x-app-code" || h == "origin" || h == "accept" || h == "expect" || h == "upgrade" || h == "te" || h == "trailer" || h == "proxy-authorization" || h == "authorization" || h == "cookie" || h == "x-user-id" || h == "host" || h == "connection" || h == "content-length" || h == "content-type" || h == "transfer-encoding" || strings.HasPrefix(h, "mcp-") || strings.HasPrefix(h, "x-forwarded-") || strings.HasPrefix(h, "x-internal-") || h == "x-api-key" || h == "x-mcp-key"
+	return h == "x-app-code" || h == "origin" || h == "accept" || h == "expect" || h == "upgrade" || h == "te" || h == "trailer" || h == "proxy-authorization" || h == "authorization" || h == "cookie" || h == "x-user-id" || h == "x-device-id" || h == "x-device-type" || h == "x-device-name" || h == "host" || h == "connection" || h == "content-length" || h == "content-type" || h == "transfer-encoding" || strings.HasPrefix(h, "mcp-") || strings.HasPrefix(h, "x-forwarded-") || strings.HasPrefix(h, "x-internal-") || h == "x-api-key" || h == "x-mcp-key"
 }
 func validate(c Catalog) error {
 	if len(c.Servers) > 50 || len(c.Tools) > 500 || len(c.Keys) > 100 {

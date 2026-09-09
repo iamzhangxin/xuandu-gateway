@@ -9,7 +9,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/wire v0.7.0
 	github.com/hashicorp/consul/api v1.20.0
-	github.com/iamzhangxin/rpcxcommon v0.0.1
+	github.com/iamzhangxin/rpcxcommon v0.0.0-20260909033443-36d4a408e89b
 	github.com/kitex-contrib/registry-consul v0.2.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -89,6 +89,7 @@ func TestCreateFailureDoesNotPersist(t *testing.T) {
 		t.Fatal(e)
 	}
 	req.Name = "second"
+	f.Revision.Files["idl/other.thrift"] = `struct Q {1:string id} service Duplicate {Q Get(1:Q req)(api.get="/p")}`
 	if _, e := s.CreateApp(ctx, req); e == nil {
 		t.Fatal("route conflict accepted")
 	}
@@ -173,7 +174,7 @@ func TestFailedCreateDoesNotPoisonReadiness(t *testing.T) {
 	ctx := context.Background()
 	s.Reconcile(ctx, nil)
 	s.CreateApp(ctx, req)
-	req.Name = "conflict"
+	req.Name = "product"
 	if _, e := s.CreateApp(ctx, req); e == nil {
 		t.Fatal("expected conflict")
 	}
@@ -299,15 +300,15 @@ func TestDomainsPublicationAndLegacyUpgrade(t *testing.T) {
 	if len(f.Refs) != downloads {
 		t.Fatal("domain change re-downloaded contract")
 	}
-	if s.Manager.Load().Domains["product.example"] != "" || s.Manager.Load().Domains[domain] != "product" {
+	if s.Manager.Load().HasApp("product.example", "product") || !s.Manager.Load().HasApp(domain, "product") {
 		t.Fatal("old host binding retained")
 	}
 	enabled := false
 	if _, err := s.UpdateAppWithRequest(ctx, "product", admin.UpdateAppRequest{Enabled: &enabled}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpdateAppWithRequest(ctx, "second", admin.UpdateAppRequest{Domain: &domain}); err == nil {
-		t.Fatal("disabled application's domain was reassigned")
+	if _, err := s.UpdateAppWithRequest(ctx, "second", admin.UpdateAppRequest{Domain: &domain}); err != nil {
+		t.Fatal("applications must be able to share a domain", err)
 	}
 	// Simulate persisted, pre-domain metadata on restart.
 	apps, _ := store.List(ctx)
@@ -333,7 +334,7 @@ func TestDomainsPublicationAndLegacyUpgrade(t *testing.T) {
 	if _, err := s.UpdateAppWithRequest(ctx, "second", admin.UpdateAppRequest{Domain: &domain}); err != nil {
 		t.Fatal(err)
 	}
-	if s.Manager.Load().Domains[domain] != "second" {
+	if !s.Manager.Load().HasApp(domain, "second") {
 		t.Fatal("legacy contract not restored")
 	}
 	// A newly observed domain cannot retain an old host when its rebuild fails.
@@ -345,7 +346,7 @@ func TestDomainsPublicationAndLegacyUpgrade(t *testing.T) {
 	}
 	b.Fail = true
 	s.Reconcile(ctx, apps)
-	if s.Manager.Load().Domains[domain] != "" {
+	if s.Manager.Load().HasApp(domain, "second") {
 		t.Fatal("LKG retained obsolete identity")
 	}
 }

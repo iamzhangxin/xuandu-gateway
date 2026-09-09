@@ -60,7 +60,8 @@ func TestBusinessErrorAcrossTTHeader(t *testing.T) {
 		if method == "Bad" {
 			return nil, common.ToRpc(ctx, common.ErrInvalidArgument)
 		}
-		return map[string]interface{}{"name": rpcmeta.UserId(ctx)}, nil
+		payload, _ := json.Marshal(rpcmeta.FromContext(ctx))
+		return map[string]interface{}{"name": string(payload)}, nil
 	}}, g, server.WithListener(listener), server.WithMetaHandler(transmeta.ServerTTHeaderHandler))
 	done := make(chan error, 1)
 	go func() { done <- svr.Run() }()
@@ -88,7 +89,11 @@ func TestBusinessErrorAcrossTTHeader(t *testing.T) {
 		if i == 1 {
 			userID = "user-wire-123"
 		}
-		ctx = rpcmeta.WithUserId(ctx, userID)
+		info := rpcmeta.RequestInfo{}
+		if i == 1 {
+			info = rpcmeta.RequestInfo{UserId: userID, AppCode: "p", DeviceId: "device-wire", DeviceType: "mobile", DeviceName: "手机"}
+		}
+		ctx = rpcmeta.WithRequestInfo(ctx, info)
 		req, _ := http.NewRequest("GET", "http://gateway"+path, nil)
 		input, _ := generic.FromHTTPRequest(req)
 		response, err := runtime.Client.GenericCall(ctx, "", input)
@@ -102,7 +107,8 @@ func TestBusinessErrorAcrossTTHeader(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if response.(*generic.HTTPResponse).Body["name"] != userID {
+			want, _ := json.Marshal(info)
+			if response.(*generic.HTTPResponse).Body["name"] != string(want) {
 				t.Fatalf("unexpected response: %+v", response)
 			}
 		}

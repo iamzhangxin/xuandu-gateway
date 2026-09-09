@@ -50,3 +50,27 @@ func TestDomainAndAppCodeIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedDomainRoutesToSelectedApp(t *testing.T) {
+	m := rt.NewManager()
+	defer m.Close(context.Background())
+	clients := map[string]*fakeClient{"product": {}, "order": {}}
+	for name, client := range clients {
+		if err := m.ReplaceApp(name, &rt.ServiceRuntime{AppName: name, Config: metadata.App{Domain: "api.example"}, Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "GET", Path: "/same"}}, Client: client}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine := server.New()
+	engine.NoRoute(NewHandler(&config.Config{Server: config.ServerConfig{MaxRequestBodyBytes: 1024}}, m).Serve)
+	for _, name := range []string{"product", "order"} {
+		response := ut.PerformRequest(engine.Engine, "GET", "/same", nil, ut.Header{Key: "Host", Value: "api.example"}, ut.Header{Key: "X-App-Code", Value: name})
+		if response.Code != 201 || clients[name].calls != 1 {
+			t.Fatalf("app=%s status=%d", name, response.Code)
+		}
+	}
+	before := clients["product"].calls + clients["order"].calls
+	response := ut.PerformRequest(engine.Engine, "GET", "/same", nil, ut.Header{Key: "Host", Value: "api.example"}, ut.Header{Key: "X-App-Code", Value: "missing"})
+	if response.Code != 403 || clients["product"].calls+clients["order"].calls != before {
+		t.Fatal("unknown application fell back to another app")
+	}
+}

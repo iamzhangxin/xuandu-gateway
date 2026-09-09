@@ -16,9 +16,12 @@ import (
 type Snapshot struct {
 	Version  uint64
 	Routes   map[string]router.Table
-	Domains  map[string]string
+	Domains  map[string]map[string]bool
 	Runtimes map[string]*ServiceRuntime
 }
+
+// HasApp 按域名和应用编码查找已发布的应用。
+func (s *Snapshot) HasApp(domain, app string) bool { return s.Domains[domain][app] }
 
 func (s *Snapshot) Match(app, method, path string) (router.Target, bool) {
 	table := s.Routes[app]
@@ -44,7 +47,7 @@ type Lease struct {
 
 func NewManager() *Manager {
 	m := &Manager{drained: make(chan struct{})}
-	m.current.Store(&Snapshot{Routes: map[string]router.Table{}, Domains: map[string]string{}, Runtimes: map[string]*ServiceRuntime{}})
+	m.current.Store(&Snapshot{Routes: map[string]router.Table{}, Domains: map[string]map[string]bool{}, Runtimes: map[string]*ServiceRuntime{}})
 	return m
 }
 func (m *Manager) Load() *Snapshot { return m.current.Load() }
@@ -108,20 +111,20 @@ func (m *Manager) Publish(name string, next *ServiceRuntime, persist func() erro
 		rs[name] = next
 	}
 	tables := map[string]router.Table{}
-	domains := map[string]string{}
+	domains := map[string]map[string]bool{}
 	for n, r := range rs {
 		domain, err := metadata.NormalizeDomain(r.Config.Domain)
 		if err != nil {
 			return err
 		}
-		if owner, exists := domains[domain]; exists && owner != n {
-			return metadata.ErrDomainConflict
+		if domains[domain] == nil {
+			domains[domain] = map[string]bool{}
 		}
 		table, err := router.Build(map[string][]idl.Route{n: r.Routes})
 		if err != nil {
 			return err
 		}
-		domains[domain], tables[n] = n, table
+		domains[domain][n], tables[n] = true, table
 	}
 	if persist != nil {
 		if e := persist(); e != nil {

@@ -275,17 +275,29 @@ func Generate(name, revision string, files map[string]string) (Object, error) {
 		for _, p := range params {
 			if p["in"] == "header" && strings.EqualFold(p["name"].(string), "X-User-ID") {
 				hasUser = true
+				p["required"] = route.RequireLogin
 			}
 		}
 		if !hasUser {
-			params = append(params, Object{"name": "X-User-ID", "in": "header", "required": false, "description": "由可信入口设置的用户 ID，透传到 rpcmeta.UserId(ctx)", "schema": Object{"type": "string"}})
+			params = append(params, Object{"name": "X-User-ID", "in": "header", "required": route.RequireLogin, "description": "由可信入口设置的用户 ID，透传到 rpcmeta.UserId(ctx)", "schema": Object{"type": "string"}})
+		}
+		for _, header := range []string{"X-Device-ID", "X-Device-Type", "X-Device-Name"} {
+			exists := false
+			for _, p := range params {
+				if p["in"] == "header" && strings.EqualFold(p["name"].(string), header) {
+					exists = true
+				}
+			}
+			if !exists {
+				params = append(params, Object{"name": header, "in": "header", "required": false, "description": "请求设备信息，持续透传到 Rpc 上下文", "schema": Object{"type": "string"}})
+			}
 		}
 		description := comment(fn.ReservedComments)
 		summary := strings.Split(description, "\n")[0]
 		if summary == "" {
 			summary = route.RPCService + "." + route.RPCMethod
 		}
-		operation := Object{"operationId": schemaKey(route.IDLPath, route.RPCService+"."+route.RPCMethod), "summary": summary, "description": description, "tags": []string{route.RPCService}, "parameters": params, "x-idl-file": route.IDLPath, "x-rpc-method": route.RPCMethod}
+		operation := Object{"operationId": schemaKey(route.IDLPath, route.RPCService+"."+route.RPCMethod), "summary": summary, "description": description, "tags": []string{route.RPCService}, "parameters": params, "x-xuandu-auth": map[bool]string{true: "required", false: "optional"}[route.RequireLogin], "x-idl-file": route.IDLPath, "x-rpc-method": route.RPCMethod}
 		if len(bodyFields) > 0 {
 			bodyRequired := false
 			for _, f := range bodyFields {
@@ -299,6 +311,9 @@ func Generate(name, revision string, files map[string]string) (Object, error) {
 			}
 		}
 		operation["responses"] = Object{"200": Object{"description": "成功；data 为下游返回对象", "content": Object{"application/json": Object{"schema": envelope(g.schema(route.IDLPath, fn.FunctionType), true)}}}, "default": Object{"description": "失败：code 为六位非零业务码，data 为 null；HTTP 状态保留错误语义", "content": Object{"application/json": Object{"schema": envelope(nil, false)}}}}
+		if route.RequireLogin {
+			operation["responses"].(Object)["401"] = Object{"description": "用户身份不能为空", "content": Object{"application/json": Object{"schema": envelope(nil, false), "example": Object{"code": "401003", "message": "用户身份不能为空", "data": nil}}}}
+		}
 		if paths[httpPath] == nil {
 			paths[httpPath] = Object{}
 		}

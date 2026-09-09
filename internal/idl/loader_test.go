@@ -31,3 +31,21 @@ func TestIncludeStructAndAlias(t *testing.T) {
 		t.Fatal(routes, e)
 	}
 }
+
+func TestLoginAnnotation(t *testing.T) {
+	for _, tc := range []struct {
+		annotation    string
+		required, bad bool
+	}{
+		{``, false, false}, {`,xuandu.Auth="required"`, true, false}, {`,xuandu.Auth='required'`, true, false}, {`,xuandu.Auth="optional"`, false, false},
+		{`,xuandu.Auth="true"`, false, true}, {`,xuandu.Auth=""`, false, true}, {`,xuandu.Auth="required",xuandu.Auth="optional"`, false, true},
+	} {
+		_, routes, err := LoadArchive(map[string]string{"idl/main.thrift": `struct Q{} service S {Q Get(1:Q req)(api.get="/p"` + tc.annotation + `)}`})
+		if (err != nil) != tc.bad {
+			t.Fatalf("%s: %v", tc.annotation, err)
+		}
+		if err == nil && routes[0].RequireLogin != tc.required {
+			t.Fatal("login requirement lost")
+		}
+	}
+}

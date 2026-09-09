@@ -1,4 +1,4 @@
-export type Route = { httpMethod: string; path: string; rpcService: string; rpcMethod: string; idlPath: string };
+export type Route = { requireLogin: boolean; httpMethod: string; path: string; rpcService: string; rpcMethod: string; idlPath: string };
 export type Application = {
  name: string; domain: string; serviceName: string; enabled: boolean; rpcTimeout: string;
  idl: { type: string; resolvedRevision: string };

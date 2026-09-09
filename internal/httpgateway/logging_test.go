@@ -27,13 +27,14 @@ func TestRequestLogDiagnostics(t *testing.T) {
 		{name: "business", body: `{}`, level: "WARN", source: "upstream_business", reason: "business_error", code: "400001", err: common.ToRpc(context.Background(), common.ErrInvalidArgument)},
 		{name: "bad JSON", body: `{secret-body`, level: "WARN", source: "gateway_validation", reason: "invalid_json", code: "400001"},
 		{name: "RPC failure", body: `{}`, level: "ERROR", source: "upstream_rpc", reason: "rpc_call_failed", code: "500203", err: kerrors.ErrGetConnection},
+		{name: "identity", body: `{}`, level: "WARN", source: "gateway_validation", reason: "identity_required", code: "401003"},
 		{name: "success", body: `{}`, level: "INFO", code: "000000"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manager := rt.NewManager()
 			defer manager.Close(context.Background())
 			cli := &fakeClient{err: tc.err}
-			manager.ReplaceApp("product", &rt.ServiceRuntime{Config: metadata.App{Domain: "product.example"}, AppName: "product", ServiceName: "product-service", Revision: "revision", Timeout: time.Second, Routes: []idl.Route{{HTTPMethod: "POST", Path: "/products/:id", RPCService: "Product", RPCMethod: "Get", IDLPath: "idl/product.thrift"}}, Client: cli})
+			manager.ReplaceApp("product", &rt.ServiceRuntime{Config: metadata.App{Domain: "product.example"}, AppName: "product", ServiceName: "product-service", Revision: "revision", Timeout: time.Second, Routes: []idl.Route{{RequireLogin: tc.name == "identity", HTTPMethod: "POST", Path: "/products/:id", RPCService: "Product", RPCMethod: "Get", IDLPath: "idl/product.thrift"}}, Client: cli})
 			h := NewHandler(&config.Config{Server: config.ServerConfig{MaxRequestBodyBytes: 1024}}, manager)
 			var logs bytes.Buffer
 			h.logger = slog.New(slog.NewJSONHandler(&logs, nil))
@@ -71,7 +72,7 @@ func TestRequestLogDiagnostics(t *testing.T) {
 					t.Fatalf("logged request value %s", secret)
 				}
 			}
-			if tc.name == "business" && event["message"] != "invalid argument" {
+			if tc.name == "business" && event["message"] != "参数无效" {
 				t.Fatal("business description lost")
 			}
 		})

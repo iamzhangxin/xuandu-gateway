@@ -46,7 +46,7 @@ Bootstrap 包括 server、consul、admin、mcp；Consul 地址从 CONSUL_HTTP_AD
 4. 校验 include 闭包，找到所有 service 文件。
 5. 从 annotation 提取各文件 HTTP 路由。
 6. 各文件建立独立 DynamicGo-aware HTTPThriftGeneric + Kitex Client。
-7. 合并应用内路由，校验包内路径冲突和跨应用域名冲突；不同域名允许相同 HTTP 方法/路径。
+7. 合并应用内路由，校验应用内路径冲突；同一域名下不同应用允许相同 HTTP 方法/路径。
 8. 持久化完整 ZIP，最后写入完成标记。
 9. 成功后统一 CAS 和发布；任何失败关闭已创建的所有候选客户端。
 
@@ -74,8 +74,12 @@ Hertz 保留 healthz、readyz、NoRoute catch-all。业务请求持有快照 lea
 所有客户端在最后一个旧 lease 释放后关闭。SIGTERM 停止管理写入、取消构建，25 秒退出期限。
 
 错误：下载/包/IDL 构建失败 422，冲突 409；业务 400/404/413/502/503/504 保持原语义。
-HTTP 业务请求先通过 Host 找应用，再校验唯一的 X-App-Code 与 name 相等，再匹配应用内路由。MCP 入口同样校验关联应用域名，但不要求 X-App-Code，仍执行原有 Key 授权。旧记录缺少 domain 时保留管理读取和编辑，补充域名后才能发布 Runtime。
+HTTP 业务请求通过 Host + X-App-Code 联合定位应用，再匹配应用内路由。MCP 入口同样校验关联应用域名，但不要求 X-App-Code，仍执行原有 Key 授权。旧记录缺少 domain 时保留管理读取和编辑，补充域名后才能发布 Runtime。
 
-普通契约构建失败保留 LKG；观察到域名变更、停用或删除时先撤销旧身份的路由，再尝试恢复新版本，不能用 LKG 保留已撤销的域名。更新通过目录 CAS 保护域名唯一性，副本通过 Watch 同步，传播期间不是所有副本同时切换。
+普通契约构建失败保留 LKG；观察到域名变更、停用或删除时先撤销旧身份的路由，再尝试恢复新版本，不能用 LKG 保留已撤销的域名。更新通过目录 CAS 保护应用目录一致性，副本通过 Watch 同步，传播期间不是所有副本同时切换。
 
 日志默认写入 /app/logs/xuandu.log 并保留 stdout，50 MiB 轮转、5 个备份。可用 XUANDU_LOG_DIR 覆盖；K8s 使用每 Pod 的 emptyDir。日志不打印下载 URL 的 query、认证头、请求体或响应体。
+
+## 登录要求和请求上下文
+
+方法注解 `xuandu.Auth = "required"` 标记需要用户身份；缺失或 optional 不要求。网关读取五个约定请求头 UserId / AppCode / DeviceId / DeviceType / DeviceName，原样写入 rpcmeta.RequestInfo，空值也写入；不额外检查格式或有效性。只有 required 接口检查 UserId 是否为空，空时返回公共错误 401003「用户身份不能为空」，不调用 RPC。HTTP 和 MCP 共享此规则，MCP Key 与这些头独立。

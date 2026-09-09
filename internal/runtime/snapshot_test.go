@@ -59,7 +59,7 @@ func TestSnapshotCASFailureAndConflict(t *testing.T) {
 	before := m.Load()
 	persisted := false
 	conflict := fixture("b", "/a")
-	conflict.Config.Domain = "a.example"
+	conflict.Routes = append(conflict.Routes, conflict.Routes[0])
 	if e := m.Publish("b", conflict, func() error { persisted = true; return nil }); e == nil || persisted || m.Load() != before {
 		t.Fatal("conflict changed state")
 	}

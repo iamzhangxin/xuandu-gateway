@@ -88,7 +88,7 @@ type Store interface {
 }
 
 // CatalogStore prevents concurrent writes to different apps from publishing
-// duplicate domain bindings based on different replicas' stale snapshots.
+// application changes based on different replicas' stale snapshots.
 type CatalogStore interface {
 	Catalog(context.Context) ([]*App, uint64, error)
 }

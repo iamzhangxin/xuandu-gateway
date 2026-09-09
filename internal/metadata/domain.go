@@ -9,7 +9,6 @@ import (
 )
 
 var ErrInvalidDomain = errors.New("domain must be a hostname or IP without scheme, port or path")
-var ErrDomainConflict = errors.New("domain already belongs to another application")
 
 // NormalizeDomain accepts a DNS name or IP, without scheme, port or path.
 func NormalizeDomain(value string) (string, error) {
