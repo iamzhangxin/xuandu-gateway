@@ -82,4 +82,4 @@ HTTP 业务请求通过 Host + X-App-Code 联合定位应用，再匹配应用�
 
 ## 登录要求和请求上下文
 
-方法注解 `xuandu.Auth = "required"` 标记需要用户身份；缺失或 optional 不要求。网关读取五个约定请求头 UserId / AppCode / DeviceId / DeviceType / DeviceName，原样写入 rpcmeta.RequestInfo，空值也写入；不额外检查格式或有效性。只有 required 接口检查 UserId 是否为空，空时返回公共错误 401003「用户身份不能为空」，不调用 RPC。HTTP 和 MCP 共享此规则，MCP Key 与这些头独立。
+方法注解 `xuandu.auth = "required"` 标记需要用户身份；缺失或 optional 不要求。网关读取五个约定请求头 UserId / AppCode / DeviceId / DeviceType / DeviceName，原样写入 rpcmeta.RequestInfo，空值也写入；不额外检查格式或有效性。只有 required 接口检查 UserId 是否为空，空时返回公共错误 401003「用户身份不能为空」，不调用 RPC。HTTP 和 MCP 共享此规则，MCP Key 与这些头独立。

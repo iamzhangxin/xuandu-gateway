@@ -44,8 +44,7 @@ export default function AppDetail() {
    <Table<Route> rowKey={r => `${r.httpMethod} ${r.path}`} dataSource={routes} loading={loading} scroll={{ x: 900 }}
     pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: n => `共 ${n} 条路由` }} locale={{ emptyText: '没有匹配的路由' }} columns={[
      { title: 'HTTP 方法', dataIndex: 'httpMethod', width: 120, render: (value: string) => <Tag color={methodColors[value]} className="method-tag">{value}</Tag> },
-     { title: 'HTTP 路径', dataIndex: 'path', render: (value: string) => <Typography.Text className="path-cell" copyable>{value}</Typography.Text> },
-     { title: '登录要求', dataIndex: 'requireLogin', width: 110, render: (required: boolean) => <Tag color={required ? 'orange' : 'default'}>{required ? '需要登录' : '允许匿名'}</Tag> },
+     { title: 'HTTP 路径', dataIndex: 'path', render: (value: string, route: Route) => <Space wrap><Typography.Text className="path-cell" copyable>{value}</Typography.Text>{route.requireLogin && <Tag color="orange">需要鉴权</Tag>}</Space> },
      { title: 'RPC Service', dataIndex: 'rpcService', width: 180 },
      { title: 'RPC Method', dataIndex: 'rpcMethod', width: 150, render: (value: string) => <span className="path-cell">{value}</span> },
      { title: 'IDL 文件', dataIndex: 'idlPath', width: 220, render: (value: string) => <span className="idl-file">{value || '—'}</span> },

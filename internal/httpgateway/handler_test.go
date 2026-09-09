@@ -153,7 +153,7 @@ func TestLoginAndRequestMetadata(t *testing.T) {
 	m := rt.NewManager()
 	defer m.Close(context.Background())
 	cli := &fakeClient{}
-	files := map[string]string{"idl/main.thrift": `struct Q {1:string id} service S {Q Login(1:Q req)(api.get="/private",xuandu.Auth="required") Q Public(1:Q req)(api.get="/public")}`}
+	files := map[string]string{"idl/main.thrift": `struct Q {1:string id} service S {Q Login(1:Q req)(api.get="/private",xuandu.auth="required") Q Public(1:Q req)(api.get="/public")}`}
 	_, routes, err := idl.LoadArchive(files)
 	if err != nil {
 		t.Fatal(err)

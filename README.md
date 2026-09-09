@@ -165,11 +165,11 @@ HTTP 和 MCP 入口将 `X-User-ID`、`X-App-Code`、`X-Device-ID`、`X-Device-Ty
 ```thrift
 GetRes Get(1: GetReq req) (
     api.get = "/api/product/get",
-    xuandu.Auth = "required"
+    xuandu.auth = "required"
 )
 ```
 
-`xuandu.Auth = "required"` 时，UserId 为空就直接返回公共错误 `ErrIdentityRequired`：HTTP 401，`{"code":"401003","message":"用户身份不能为空","data":null}`，不调用下游。未声明或声明 `"optional"` 时不拦截空身份。登录规则随 ZIP 契约保存、更新和恢复，并展示在路由及接口文档中。注解只支持 required / optional；同一方法不能重复声明。
+`xuandu.auth = "required"` 时，UserId 为空就直接返回公共错误 `ErrIdentityRequired`：HTTP 401，`{"code":"401003","message":"用户身份不能为空","data":null}`，不调用下游。未声明或声明 `"optional"` 时不拦截空身份。登录规则随 ZIP 契约保存、更新和恢复，并展示在路由及接口文档中。注解只支持 required / optional；同一方法不能重复声明。
 
 公共错误提示统一为中文。Token 校验由可信前置网关完成，并覆盖客户端传入的身份头；玄渡只负责声明了登录要求的接口的空用户身份检查。MCP 工具调用也遵循同一登录规则，失败时设置 `isError=true`。
 

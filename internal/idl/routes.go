@@ -35,11 +35,12 @@ func ExtractRoutes(b *Bundle) ([]Route, error) {
 		count := 0
 		requireLogin, authSeen := false, false
 		for _, a := range fn.Annotations {
-			if a.Key != "xuandu.Auth" {
+			// 兼容已发布契约的大小写，避免升级后丢失登录要求。
+			if !strings.EqualFold(a.Key, "xuandu.auth") {
 				continue
 			}
 			if authSeen || len(a.Values) != 1 || (a.Values[0] != "required" && a.Values[0] != "optional") {
-				return nil, fmt.Errorf("xuandu.Auth must be required or optional, declared once")
+				return nil, fmt.Errorf("xuandu.auth must be required or optional, declared once")
 			}
 			authSeen, requireLogin = true, a.Values[0] == "required"
 		}

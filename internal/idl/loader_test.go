@@ -37,8 +37,8 @@ func TestLoginAnnotation(t *testing.T) {
 		annotation    string
 		required, bad bool
 	}{
-		{``, false, false}, {`,xuandu.Auth="required"`, true, false}, {`,xuandu.Auth='required'`, true, false}, {`,xuandu.Auth="optional"`, false, false},
-		{`,xuandu.Auth="true"`, false, true}, {`,xuandu.Auth=""`, false, true}, {`,xuandu.Auth="required",xuandu.Auth="optional"`, false, true},
+		{``, false, false}, {`,xuandu.auth="required"`, true, false}, {`,xuandu.Auth="required"`, true, false}, {`,xuandu.auth='required'`, true, false}, {`,xuandu.auth="optional"`, false, false},
+		{`,xuandu.auth="true"`, false, true}, {`,xuandu.auth=""`, false, true}, {`,xuandu.auth="required",xuandu.auth="optional"`, false, true},
 	} {
 		_, routes, err := LoadArchive(map[string]string{"idl/main.thrift": `struct Q{} service S {Q Get(1:Q req)(api.get="/p"` + tc.annotation + `)}`})
 		if (err != nil) != tc.bad {

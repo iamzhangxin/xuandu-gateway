@@ -92,7 +92,7 @@ func TestGetBodyWarning(t *testing.T) {
 }
 
 func TestLoginMetadata(t *testing.T) {
-	doc, err := Generate("p", "revision", map[string]string{"idl/main.thrift": `struct Q {1:string user(api.header="X-User-ID")} service S {Q Get(1:Q req)(api.get="/p",xuandu.Auth="required")}`})
+	doc, err := Generate("p", "revision", map[string]string{"idl/main.thrift": `struct Q {1:string user(api.header="X-User-ID")} service S {Q Get(1:Q req)(api.get="/p",xuandu.auth="required")}`})
 	if err != nil {
 		t.Fatal(err)
 	}
